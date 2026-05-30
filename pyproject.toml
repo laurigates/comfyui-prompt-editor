@@ -1,0 +1,50 @@
+[project]
+name = "comfyui-prompt-editor"
+description = "Full-screen touch editor for multiline prompt widgets: weight steppers, embedding/LoRA insert palette, and a token counter."
+version = "0.1.0"
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Lauri Gates" }]
+keywords = ["comfyui", "comfyui-nodes", "ui", "picker", "mobile", "touch"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: JavaScript",
+    "Topic :: Multimedia :: Graphics",
+]
+
+# Floor tied to widget.onPointerDown availability. Frontend-only pack — no runtime Python deps.
+dependencies = [
+    "comfyui-frontend-package>=1.40",
+]
+
+[project.urls]
+Repository = "https://github.com/laurigates/comfyui-prompt-editor"
+Issues = "https://github.com/laurigates/comfyui-prompt-editor/issues"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11",
+    "pytest>=8",
+    "pre-commit>=4",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.comfy]
+PublisherId = "laurigates"
+DisplayName = "Prompt Editor"
+Icon = ""

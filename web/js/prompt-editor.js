@@ -385,7 +385,6 @@ function openEditor(widget, node) {
     width: "min(960px, calc(100vw - 16px))",
     height: "min(92vh, 900px)",
     footerLeftHTML: '<span class="pe-hint">Cmd/Ctrl+Enter to save · Esc to cancel</span>',
-    body: wrap,
     onKeyDown: (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
@@ -397,8 +396,14 @@ function openEditor(widget, node) {
     onClose: () => {},
   });
 
-  // A primary "Save" action lives in the footer-adjacent toolbar of the shell
-  // is search-only, so append the Save button into our own toolbar row instead.
+  // modal-shell's contract: the consumer fills `modal.bodyEl` AFTER the shell
+  // is opened (there is no `body` option — see openModalShell's opts). Mirror
+  // gallery-loader's `modal.bodyEl.appendChild(...)`. Without this the dialog
+  // renders empty.
+  modal.bodyEl.appendChild(wrap);
+
+  // A primary "Save" action: the shell's toolbar/search row is for pickers, so
+  // append the Save button into our own toolbar row (already inside `wrap`).
   const saveBtn = makeBtn("Save", "Save (Cmd/Ctrl+Enter)", "pe-btn-primary");
   saveBtn.addEventListener("click", commit);
   bar.appendChild(saveBtn);

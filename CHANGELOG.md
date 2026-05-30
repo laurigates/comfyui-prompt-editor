@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.1...comfyui-prompt-editor-v0.1.2) (2026-05-30)
+
+
+### Miscellaneous
+
+* **deps:** Bump googleapis/release-please-action from 4 to 5 ([#1](https://github.com/laurigates/comfyui-prompt-editor/issues/1)) ([66cf3fa](https://github.com/laurigates/comfyui-prompt-editor/commit/66cf3faacc66781d0203c9b0200d9c3cb8f0f4e7))
+
 ## [0.1.1](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.0...comfyui-prompt-editor-v0.1.1) (2026-05-30)
 
 

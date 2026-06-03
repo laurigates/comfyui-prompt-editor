@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.2...comfyui-prompt-editor-v0.1.3) (2026-06-03)
+
+
+### Features
+
+* weight the inner word at the caret when nothing is selected ([#4](https://github.com/laurigates/comfyui-prompt-editor/issues/4)) ([cc19649](https://github.com/laurigates/comfyui-prompt-editor/commit/cc19649a7e15a54b0f3a9d9982c1e575b864e6db))
+
 ## [0.1.2](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.1...comfyui-prompt-editor-v0.1.2) (2026-05-30)
 
 

@@ -124,6 +124,16 @@ export function isTargetWidget(w) {
  *   - bare text         -> wrap in `(text:1.1)` (or 0.9 when stepping down)
  *   - `(text:N.N)`      -> rewrite N.N by `delta`, clamped to [0, 2], 1-decimal
  *   - `(text)`          -> treated as weight 1.1 (LiteGraph implicit emphasis)
+ *
+ * With no real selection (a bare caret, `selStart === selEnd`), the range is
+ * expanded to the "inner word": the run of non-delimiter characters the caret
+ * sits in, where delimiters are whitespace and commas. This lets a user weight
+ * the token their caret is in without selecting it. Parentheses are NOT
+ * delimiters, so a caret inside `(cat:1.1)` expands over the whole weighted
+ * token and rewrites its weight in place. When the caret isn't inside a word
+ * (e.g. it sits in whitespace), it falls back to the whole value so an empty
+ * prompt or a between-words nudge still does something sensible.
+ *
  * Returns { text, selStart, selEnd } with the selection re-anchored over the
  * (possibly re-wrapped) token so repeated steps keep operating on it.
  *
@@ -144,13 +154,29 @@ export function bumpWeight(text, selStart, selEnd, delta) {
   a = Math.max(0, Math.min(a, src.length));
   b = Math.max(0, Math.min(b, src.length));
 
-  // Nothing selected → operate on the whole value (a common mobile case where
-  // the user just wants to nudge the entire short prompt).
+  // No real selection (a bare caret, or a whitespace-only range) → expand to the
+  // "inner word": the run of non-delimiter characters around the caret, so the
+  // user can weight the token their caret is in without selecting it. Delimiters
+  // are whitespace and commas; parentheses are intentionally NOT delimiters, so
+  // a caret inside `(cat:1.1)` expands over the whole weighted token. Falls back
+  // to the whole value when the caret isn't inside a word (e.g. in whitespace),
+  // preserving the original whole-prompt nudge.
   let frag = src.slice(a, b);
   if (frag.trim() === "") {
-    a = 0;
-    b = src.length;
-    frag = src;
+    const isDelim = (ch) => ch === undefined || /[\s,]/.test(ch);
+    // Collapse a whitespace-only range to its start so we expand from one caret.
+    let ws = a;
+    let we = a;
+    while (ws > 0 && !isDelim(src[ws - 1])) ws--;
+    while (we < src.length && !isDelim(src[we])) we++;
+    if (src.slice(ws, we).trim() !== "") {
+      a = ws;
+      b = we;
+    } else {
+      a = 0;
+      b = src.length;
+    }
+    frag = src.slice(a, b);
   }
 
   // Empty/whitespace-only value → no token to weight; leave it untouched.
@@ -327,11 +353,11 @@ function openEditor(widget, node) {
     return b;
   };
 
-  const downBtn = makeBtn("weight −", "Decrease weight of selection (or whole prompt)");
-  const upBtn = makeBtn("weight +", "Increase weight of selection (or whole prompt)");
+  const downBtn = makeBtn("weight −", "Decrease weight of selection (or the word at the caret)");
+  const upBtn = makeBtn("weight +", "Increase weight of selection (or the word at the caret)");
   const hint = document.createElement("span");
   hint.className = "pe-hint";
-  hint.textContent = "select a token, then weight ± — or nudge the whole prompt";
+  hint.textContent = "select a token, or just place the caret in a word, then weight ±";
 
   bar.append(downBtn, upBtn, hint);
 

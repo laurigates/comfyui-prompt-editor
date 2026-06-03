@@ -147,10 +147,42 @@ describe("bumpWeight", () => {
     expect(low.text).toBe("(cat:0.0)");
   });
 
-  it("operates on the whole value when the selection is empty/whitespace", () => {
-    // caret with no selection (start === end) → whole prompt
+  it("expands a bare caret to the inner word (single-word value)", () => {
+    // caret with no selection (start === end) → the word it sits in. For a
+    // single-word value that is the whole value.
     const res = bumpWeight("masterpiece", 11, 11, 0.1);
     expect(res.text).toBe("(masterpiece:1.1)");
+  });
+
+  it("weights only the word the caret sits in, not the whole prompt", () => {
+    // "blue sky, green grass" — caret inside "green" (index 12).
+    const text = "blue sky, green grass";
+    const res = bumpWeight(text, 12, 12, 0.1);
+    expect(res.text).toBe("blue sky, (green:1.1) grass");
+    // selection re-anchored over the rewrapped inner word
+    expect(res.text.slice(res.selStart, res.selEnd)).toBe("(green:1.1)");
+  });
+
+  it("expands a bare caret over an existing weighted token and rewrites it", () => {
+    // Parentheses are not delimiters, so a caret inside (cat:1.1) expands over
+    // the whole token and bumps its weight in place.
+    const text = "a (cat:1.1) sat";
+    const res = bumpWeight(text, 6, 6, 0.1); // caret inside "cat"
+    expect(res.text).toBe("a (cat:1.2) sat");
+  });
+
+  it("expands to the word immediately left of the caret", () => {
+    // caret sits right after "blue" (index 4, before the single space): the char
+    // before the caret is a word char, so the inner word is "blue".
+    const res = bumpWeight("blue sky", 4, 4, 0.1);
+    expect(res.text).toBe("(blue:1.1) sky");
+  });
+
+  it("falls back to the whole value when the caret is surrounded by delimiters", () => {
+    // double space — caret at index 5 sits between two spaces, so there is no
+    // inner word and the whole prompt is nudged.
+    const res = bumpWeight("blue  sky", 5, 5, 0.1);
+    expect(res.text).toBe("(blue  sky:1.1)");
   });
 
   it("preserves surrounding text outside the selection", () => {

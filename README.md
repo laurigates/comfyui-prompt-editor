@@ -8,6 +8,11 @@ Full-screen touch editor for multiline prompt widgets: weight steppers, embeddin
 > touch-friendly HTML modals that replace clunky native LiteGraph controls,
 > detected by widget name, additive and non-clobbering.
 
+![Prompt editor modal](docs/editor.png)
+
+*The full-screen editor over any multiline prompt widget: per-token weight
+steppers and a roomy textarea, committed back with Cmd/Ctrl+Enter.*
+
 ## Install
 
 ```sh

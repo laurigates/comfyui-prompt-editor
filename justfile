@@ -32,3 +32,13 @@ test:
 # Lint + test in one shot.
 [group: "quality"]
 check: lint test
+
+##########
+# Documentation artifacts
+##########
+
+# Regenerate docs/editor.png via the containerized screenshot generator.
+[group: "docs"]
+screenshots:
+    docker build -f screenshots/Dockerfile -t comfyui-prompt-editor-screenshots .
+    docker run --rm -v "$(pwd)/docs:/out" comfyui-prompt-editor-screenshots

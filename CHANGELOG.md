@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.3...comfyui-prompt-editor-v0.1.4) (2026-06-04)
+
+
+### Documentation
+
+* **screenshots:** add containerized README screenshot pipeline ([#6](https://github.com/laurigates/comfyui-prompt-editor/issues/6)) ([d93d271](https://github.com/laurigates/comfyui-prompt-editor/commit/d93d271c7e86436b320438ce0d1d332fc850ef3b))
+
 ## [0.1.3](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.2...comfyui-prompt-editor-v0.1.3) (2026-06-03)
 
 

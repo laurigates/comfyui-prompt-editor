@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.5](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.4...comfyui-prompt-editor-v0.1.5) (2026-06-06)
+
+
+### Features
+
+* **build:** migrate to TypeScript + bun build ([#10](https://github.com/laurigates/comfyui-prompt-editor/issues/10)) ([6278110](https://github.com/laurigates/comfyui-prompt-editor/commit/6278110c2907536de7884a51851bb17343242493))
+
+
+### Miscellaneous
+
+* **deps:** Bump gitleaks/gitleaks-action from 2 to 3 ([#8](https://github.com/laurigates/comfyui-prompt-editor/issues/8)) ([5cbf65a](https://github.com/laurigates/comfyui-prompt-editor/commit/5cbf65acdd6b3216172d33d13558c6f542f3e405))
+
 ## [0.1.4](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.3...comfyui-prompt-editor-v0.1.4) (2026-06-04)
 
 

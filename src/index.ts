@@ -1,6 +1,6 @@
 // Prompt Editor — ComfyUI frontend extension.
 //
-// Served at /extensions/comfyui-prompt-editor/js/prompt-editor.js — the pack
+// Built to /extensions/comfyui-prompt-editor/dist/index.js — the pack
 // directory name IS this URL segment. Do not rename the pack dir without
 // syncing EXT_NAME below (used for log prefixes).
 //
@@ -20,19 +20,76 @@
 // because it is a pure DOM op on the textarea (came for free). The weight
 // toolbar proper, token counter, embedding palette, and tabbed multi-encoder
 // editing are v0.2+.
+//
+// The modal-shell primitive is consumed from @laurigates/comfy-modal-kit
+// (bundled INLINE into the build output). The fzf-lite fuzzy matcher also
+// lives in the kit, reserved for the v0.4 embedding palette. See ADR-0011.
 
-import { app } from "../../../scripts/app.js";
-import { openModalShell } from "./modal-shell.js";
+import { openModalShell } from "@laurigates/comfy-modal-kit";
+import { app } from "/scripts/app.js";
 
 const EXT_NAME = "comfyui-prompt-editor";
 const STYLE_ID = "pe-style";
+
+// ============================================================
+// Types
+// ============================================================
+//
+// The `@comfyorg/comfyui-frontend-types` package types `app` via the shim in
+// comfyui-shims.d.ts, but does not re-export the LiteGraph widget/node shapes
+// this pack reaches into. We model the small touched surface with local
+// structural interfaces (the "local interface extension — narrower blast
+// radius" approach), keeping the seam narrow.
+
+interface PromptWidget {
+  name?: string;
+  type?: string;
+  value?: unknown;
+  options?: {
+    multiline?: boolean;
+    values?: unknown[];
+    [key: string]: unknown;
+  };
+  inputEl?: { tagName?: string; value?: string } | null;
+  callback?: (value: string, canvas: unknown, node: unknown) => void;
+  onPointerDown?: ((pointer: unknown, node: unknown, canvas: unknown) => unknown) | undefined;
+  // Idempotency guards stamped on the widget so each strategy applies once.
+  _promptEditorPointerPatched?: boolean;
+  _promptEditorButtonAdded?: boolean;
+}
+
+interface PromptNode {
+  widgets?: PromptWidget[];
+  setDirtyCanvas?: (fg: boolean, bg: boolean) => void;
+  addWidget?: (
+    type: string,
+    name: string,
+    value: unknown,
+    callback: () => void,
+    options?: Record<string, unknown>,
+  ) => PromptWidget | undefined;
+}
+
+// ============================================================
+// Widget detection — generic across node packs
+// ============================================================
+//
+// A target is a multiline STRING widget. ComfyUI builds these from an input
+// spec of `("STRING", {"multiline": True})`; the resulting widget exposes
+// `options.multiline === true` and renders a DOM <textarea> as `inputEl`.
+// We accept either signal so the pack works across frontend version skews:
+//   - options.multiline truthy (the canonical marker), OR
+//   - a DOM textarea inputEl (the rendered shape), OR
+//   - the widget type is the multiline STRING widget ("customtext").
+// The name fast-path is an additional accept, but never the sole gate — we
+// still require the widget to look like editable text, never a combo/number.
 
 // Name fast-path: widgets known to carry prompt-semantic multiline text across
 // the SD3 / Flux / HiDream / Qwen / Hunyuan encoder zoo. Detection is NOT
 // limited to this set — any multiline STRING widget qualifies (see
 // isMultilineStringWidget). The set only short-circuits the common case and
 // documents intent.
-export const TARGET_WIDGET_NAMES = new Set([
+export const TARGET_WIDGET_NAMES = new Set<string>([
   "text",
   "prompt",
   "clip_l",
@@ -50,36 +107,23 @@ export const TARGET_WIDGET_NAMES = new Set([
   "wildcard_text",
 ]);
 
-// ============================================================
-// Widget detection — generic across node packs
-// ============================================================
-//
-// A target is a multiline STRING widget. ComfyUI builds these from an input
-// spec of `("STRING", {"multiline": True})`; the resulting widget exposes
-// `options.multiline === true` and renders a DOM <textarea> as `inputEl`.
-// We accept either signal so the pack works across frontend version skews:
-//   - options.multiline truthy (the canonical marker), OR
-//   - a DOM textarea inputEl (the rendered shape), OR
-//   - the widget type is the multiline STRING widget ("customtext").
-// The name fast-path is an additional accept, but never the sole gate — we
-// still require the widget to look like editable text, never a combo/number.
-
-export function isMultilineStringWidget(w) {
+export function isMultilineStringWidget(w: unknown): boolean {
   if (!w || typeof w !== "object") return false;
+  const widget = w as PromptWidget;
   // Exclude combos and anything backed by a fixed value list (e.g. samplers).
-  if (Array.isArray(w.options?.values)) return false;
+  if (Array.isArray(widget.options?.values)) return false;
 
-  const opts = w.options ?? {};
+  const opts = widget.options ?? {};
   const isTextarea =
-    !!w.inputEl &&
-    typeof w.inputEl.tagName === "string" &&
-    w.inputEl.tagName.toUpperCase() === "TEXTAREA";
-  const typeStr = typeof w.type === "string" ? w.type.toLowerCase() : "";
+    !!widget.inputEl &&
+    typeof widget.inputEl.tagName === "string" &&
+    widget.inputEl.tagName.toUpperCase() === "TEXTAREA";
+  const typeStr = typeof widget.type === "string" ? widget.type.toLowerCase() : "";
   const looksMultiline = opts.multiline === true || isTextarea || typeStr === "customtext";
   if (!looksMultiline) return false;
 
   // Value must be string-like (or absent → defaults to "") to be editable text.
-  if (w.value != null && typeof w.value !== "string") return false;
+  if (widget.value != null && typeof widget.value !== "string") return false;
 
   // Name fast-path is a bonus signal, but a genuinely multiline string widget
   // with an unknown name still qualifies — detection stays generic.
@@ -100,22 +144,26 @@ export function isMultilineStringWidget(w) {
  *
  * Pure: inspects the widget object only — no DOM mutation, no side effects.
  * This is the generic-across-node-packs contract, so it is unit-tested.
- *
- * @param {object} w  A LiteGraph widget (or any object / nullish value).
- * @returns {boolean}
  */
-export function isTargetWidget(w) {
+export function isTargetWidget(w: unknown): boolean {
   if (!w || typeof w !== "object") return false;
-  if (isMultilineStringWidget(w)) return true;
+  const widget = w as PromptWidget;
+  if (isMultilineStringWidget(widget)) return true;
   // Name fast-path: must be string-valued and must not be a combo.
-  if (!TARGET_WIDGET_NAMES.has(w.name)) return false;
-  if (Array.isArray(w.options?.values)) return false;
-  return typeof w.value === "string";
+  if (typeof widget.name !== "string" || !TARGET_WIDGET_NAMES.has(widget.name)) return false;
+  if (Array.isArray(widget.options?.values)) return false;
+  return typeof widget.value === "string";
 }
 
 // ============================================================
 // Pure helpers (unit-tested in tests/js/)
 // ============================================================
+
+export interface WeightResult {
+  text: string;
+  selStart: number;
+  selEnd: number;
+}
 
 /**
  * Adjust the ComfyUI prompt weight of `text`, optionally restricted to the
@@ -139,14 +187,13 @@ export function isTargetWidget(w) {
  *
  * Pure: no DOM, no side effects. The modal calls this then writes the result
  * back into the textarea and restores the selection.
- *
- * @param {string} text   Full textarea value.
- * @param {number} selStart Selection start (defaults to 0).
- * @param {number} selEnd   Selection end (defaults to text.length).
- * @param {number} delta    Weight step, e.g. +0.1 / -0.1.
- * @returns {{text: string, selStart: number, selEnd: number}}
  */
-export function bumpWeight(text, selStart, selEnd, delta) {
+export function bumpWeight(
+  text: string,
+  selStart: number,
+  selEnd: number,
+  delta: number,
+): WeightResult {
   const src = typeof text === "string" ? text : "";
   let a = Number.isInteger(selStart) ? selStart : 0;
   let b = Number.isInteger(selEnd) ? selEnd : src.length;
@@ -163,7 +210,7 @@ export function bumpWeight(text, selStart, selEnd, delta) {
   // preserving the original whole-prompt nudge.
   let frag = src.slice(a, b);
   if (frag.trim() === "") {
-    const isDelim = (ch) => ch === undefined || /[\s,]/.test(ch);
+    const isDelim = (ch: string | undefined): boolean => ch === undefined || /[\s,]/.test(ch);
     // Collapse a whitespace-only range to its start so we expand from one caret.
     let ws = a;
     let we = a;
@@ -184,8 +231,8 @@ export function bumpWeight(text, selStart, selEnd, delta) {
     return { text: src, selStart: a, selEnd: b };
   }
 
-  const clamp = (n) => Math.max(0, Math.min(2, n));
-  const fmt = (n) => {
+  const clamp = (n: number): number => Math.max(0, Math.min(2, n));
+  const fmt = (n: number): string => {
     // 1 decimal place, no trailing-zero noise beyond one digit ("1.0", "1.1").
     const r = Math.round(clamp(n) * 10) / 10;
     return r.toFixed(1);
@@ -196,13 +243,13 @@ export function bumpWeight(text, selStart, selEnd, delta) {
   // Match an implicitly-emphasised token: ( inner ) — LiteGraph weight 1.1.
   const emphasised = !weighted && frag.match(/^\s*\((.*)\)\s*$/s);
 
-  let inner;
-  let baseWeight;
+  let inner: string;
+  let baseWeight: number;
   if (weighted) {
-    inner = weighted[1];
-    baseWeight = Number.parseFloat(weighted[2]);
+    inner = weighted[1] ?? "";
+    baseWeight = Number.parseFloat(weighted[2] ?? "1");
   } else if (emphasised) {
-    inner = emphasised[1];
+    inner = emphasised[1] ?? "";
     baseWeight = 1.1;
   } else {
     inner = frag;
@@ -294,7 +341,7 @@ const CSS = `
 }
 `;
 
-function ensureStyle() {
+function ensureStyle(): void {
   if (document.getElementById(STYLE_ID)) return;
   const s = document.createElement("style");
   s.id = STYLE_ID;
@@ -312,7 +359,7 @@ function ensureStyle() {
 // see the new value, then mark the canvas dirty. We never write on dismiss, so
 // a cancelled edit leaves the serialized workflow byte-for-byte unchanged.
 
-function applyValue(widget, node, value) {
+function applyValue(widget: PromptWidget, node: PromptNode | null, value: string): void {
   if (typeof value !== "string") return;
   widget.value = value;
   if (widget.inputEl && typeof widget.inputEl.value === "string") {
@@ -331,7 +378,10 @@ function applyValue(widget, node, value) {
 // Modal — full-viewport textarea editor
 // ============================================================
 
-function openEditor(widget, node) {
+function openEditor(
+  widget: PromptWidget,
+  node: PromptNode | null,
+): ReturnType<typeof openModalShell> {
   ensureStyle();
 
   const initial = typeof widget?.value === "string" ? widget.value : "";
@@ -344,7 +394,7 @@ function openEditor(widget, node) {
   const bar = document.createElement("div");
   bar.className = "pe-bar";
 
-  const makeBtn = (label, title, cls) => {
+  const makeBtn = (label: string, title: string, cls?: string): HTMLButtonElement => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = `pe-btn${cls ? ` ${cls}` : ""}`;
@@ -372,7 +422,7 @@ function openEditor(widget, node) {
   wrap.append(bar, textarea);
 
   let committed = false;
-  const commit = () => {
+  const commit = (): void => {
     if (committed) return;
     committed = true;
     try {
@@ -386,7 +436,7 @@ function openEditor(widget, node) {
     modal.close();
   };
 
-  const stepWeight = (delta) => {
+  const stepWeight = (delta: number): void => {
     try {
       const start = textarea.selectionStart ?? 0;
       const end = textarea.selectionEnd ?? textarea.value.length;
@@ -411,7 +461,7 @@ function openEditor(widget, node) {
     width: "min(960px, calc(100vw - 16px))",
     height: "min(92vh, 900px)",
     footerLeftHTML: '<span class="pe-hint">Cmd/Ctrl+Enter to save · Esc to cancel</span>',
-    onKeyDown: (e) => {
+    onKeyDown: (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         commit();
@@ -456,7 +506,7 @@ function openEditor(widget, node) {
 // Wiring
 // ============================================================
 
-function enhanceNode(node) {
+function enhanceNode(node: PromptNode | null): void {
   if (!node?.widgets) return;
   for (const w of node.widgets) {
     // Generic multiline-string detection OR the name fast-path — both gated so
@@ -468,13 +518,18 @@ function enhanceNode(node) {
     if (!w._promptEditorPointerPatched) {
       w._promptEditorPointerPatched = true;
       const origDown = w.onPointerDown;
-      w.onPointerDown = function (pointer, ownerNode, canvas) {
+      w.onPointerDown = function (
+        this: PromptWidget,
+        pointer: unknown,
+        ownerNode: unknown,
+        canvas: unknown,
+      ): unknown {
         try {
           if (typeof origDown === "function") {
             const consumed = origDown.call(this, pointer, ownerNode, canvas);
             if (consumed) return consumed;
           }
-          openEditor(w, ownerNode || node);
+          openEditor(w, (ownerNode as PromptNode) || node);
           return true; // consume — suppress the native sliver edit
         } catch (e) {
           console.warn(`[${EXT_NAME}] editor open failed`, e);
@@ -490,7 +545,7 @@ function enhanceNode(node) {
     if (!w._promptEditorButtonAdded) {
       w._promptEditorButtonAdded = true;
       try {
-        const btn = node.addWidget(
+        const btn = node.addWidget?.(
           "button",
           `⤢ ${w.name}`,
           null,
@@ -520,8 +575,8 @@ function enhanceNode(node) {
   }
 }
 
-function refreshAllNodes() {
-  const graph = app?.graph;
+function refreshAllNodes(): void {
+  const graph = app?.graph as unknown as { _nodes?: PromptNode[] } | undefined;
   if (!graph?._nodes) return;
   for (const node of graph._nodes) enhanceNode(node);
 }
@@ -532,10 +587,10 @@ app.registerExtension({
     refreshAllNodes();
   },
   // Handle freshly created nodes AND nodes restored from a saved graph.
-  async nodeCreated(node) {
-    enhanceNode(node);
+  async nodeCreated(node: unknown) {
+    enhanceNode(node as PromptNode);
   },
-  async loadedGraphNode(node) {
-    enhanceNode(node);
+  async loadedGraphNode(node: unknown) {
+    enhanceNode(node as PromptNode);
   },
 });

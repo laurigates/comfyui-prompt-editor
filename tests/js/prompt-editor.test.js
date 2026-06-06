@@ -1,15 +1,16 @@
+import { fuzzyRank } from "@laurigates/comfy-modal-kit";
 import { describe, expect, it } from "vitest";
-import { fuzzyRank } from "../../web/js/modal-fuzzy.js";
 import {
   bumpWeight,
   isMultilineStringWidget,
   isTargetWidget,
   TARGET_WIDGET_NAMES,
-} from "../../web/js/prompt-editor.js";
+} from "../../src/index.ts";
 
-// The copied fuzzy primitive must remain importable (used by future v0.4
-// embedding palette). fuzzyRank(query, [primary, ...rest]) -> {score, ...}|null.
-describe("comfyui-prompt-editor: copied primitives", () => {
+// The fuzzy primitive (now consumed from @laurigates/comfy-modal-kit) must
+// remain importable (used by future v0.4 embedding palette).
+// fuzzyRank(query, [primary, ...rest]) -> {score, ...}|null.
+describe("comfyui-prompt-editor: kit primitives", () => {
   it("fuzzyRank scores a subsequence match and rejects a non-match", () => {
     const hit = fuzzyRank("eul", ["euler"]);
     expect(hit).not.toBeNull();

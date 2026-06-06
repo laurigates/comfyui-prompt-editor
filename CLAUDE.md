@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-Frontend-only ComfyUI custom-node pack. `__init__.py` is a loader stub; the whole extension lives in `web/js/`.
+Frontend-only ComfyUI custom-node pack. `__init__.py` is a loader stub; the
+extension is authored in **TypeScript** under `src/` and built to `web/dist/`
+via `bun build` (see ADR-0001).
 
 ## The pattern ("the vein")
 
@@ -11,27 +13,39 @@ native LiteGraph control. Widgets are matched **by name** (generic across
 node packs), the enhancement is **additive** (graceful fallback to the
 native control, never breaks serialized workflows), and the modal is
 **touch-first** (16px inputs to avoid iOS zoom, big tap targets, momentum
-scroll). Reuses `modal-shell.js` (`openModalShell` / `closeModalShell`)
-and `modal-fuzzy.js` (`fuzzyScore` / `fuzzyRank` / `highlightMatches`).
+scroll). Consumes the shared `@laurigates/comfy-modal-kit`
+(`openModalShell` / `closeModalShell` / `fuzzyScore` / `fuzzyRank` /
+`highlightMatches`), **bundled inline** at build time — the modal-shell +
+fuzzy primitives are no longer vendored.
 
 ## File layout
 
 | Path | Purpose |
 |------|---------|
-| `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web"`. |
-| `web/js/prompt-editor.js` | The extension: widget interception + modal. |
-| `web/js/modal-shell.js` | Reusable modal dialog (copied from gallery-loader). |
-| `web/js/modal-fuzzy.js` | fzf-lite fuzzy matcher (copied from gallery-loader). |
-| `pyproject.toml` | Comfy Registry metadata. `PublisherId` + `version` are the fields you touch. |
-| `.github/workflows/` | `ci.yml` (ruff/biome/pytest/vitest/gitleaks), `publish.yml` (auto-publish on version bump), `release-please.yml`. |
-| `tests/` | pytest backend suite. `tests/js/` Vitest suite for pure JS helpers. |
+| `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web/dist"`. |
+| `src/index.ts` | The extension (TypeScript): widget interception + modal. Build entry. |
+| `src/comfyui-shims.d.ts` | Types the runtime `/scripts/app.js` import via a tsconfig `paths` shim. |
+| `web/dist/index.js` | **Generated** ESM build output (git-ignored). The served extension. |
+| `tsconfig.json` / `knip.json` | TS strict config (`noEmit`); knip dead-code gate. |
+| `pyproject.toml` | Comfy Registry metadata. `[tool.comfy] includes = ["web/dist"]`. `PublisherId` + `version` are the fields you touch. |
+| `.github/workflows/` | `ci.yml` (ruff/biome/typecheck/build/pytest/vitest/gitleaks), `publish.yml` (bun build then auto-publish on version bump), `release-please.yml`. |
+| `tests/` | pytest backend suite. `tests/js/` Vitest suite importing the `.ts` source + kit. |
 | `justfile` | `lint`, `format`, `test`, `check` recipes — the local CI gate. |
+| `docs/blueprint/adrs/` | Architecture Decision Records. |
+
+## Build entry
+
+The single build entry is `src/index.ts` (ComfyUI loaded the former
+`web/js/prompt-editor.js`; it imported `modal-shell.js`). `bun build` bundles it
+to `web/dist/index.js`: the `/scripts/app.js` runtime import is left
+**external** (`--external '/scripts/*'`), and `@laurigates/comfy-modal-kit` is
+bundled **inline**.
 
 ## Hard rules
 
-- **Pack directory name is part of the URL.** `web/js/prompt-editor.js` is
-  served at `/extensions/comfyui-prompt-editor/js/prompt-editor.js`. Renaming the pack dir
-  breaks every fetch. If unavoidable, sync `EXT_NAME` in the JS.
+- **Pack directory name is part of the URL.** `web/dist/index.js` is
+  served at `/extensions/comfyui-prompt-editor/index.js`. Renaming the pack dir
+  breaks every fetch. If unavoidable, sync `EXT_NAME` in `src/index.ts`.
 - **No Python dependencies. The pack is frontend-only; a feature genuinely needing Python belongs in a separate companion pack.**
 - **Additive only.** Never clobber an existing tooltip/control; fall back to
   the native widget when there's no match. Never fabricate data.
@@ -43,23 +57,37 @@ and `modal-fuzzy.js` (`fuzzyScore` / `fuzzyRank` / `highlightMatches`).
 
 ```sh
 uv sync --group dev          # ruff, pytest, pre-commit
-npm install --no-audit --no-fund   # Vitest (dev-only; nothing ships from node_modules)
+bun install                  # TypeScript, Vitest, Biome, knip, comfy-modal-kit
 pre-commit install
-just check                   # lint + test — the local CI gate
+bun run typecheck            # tsc --noEmit (the type gate)
+bun run build                # emit web/dist/index.js (kit inlined, /scripts/* external)
+bun run test                 # Vitest
+bun run lint                 # biome check
+bun run knip                 # dead-code gate
 ```
 
-Iterating on JS/CSS/JSON needs **no ComfyUI restart** — hard-refresh the tab.
+The served file is `web/dist/index.js` (the build output), **not** the source.
+After editing `src/`, run `bun run build`, then hard-refresh the tab — no
+ComfyUI restart needed.
 
 
 ### Endpoint reachability check
 
 ```sh
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8188/extensions/comfyui-prompt-editor/js/prompt-editor.js
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8188/extensions/comfyui-prompt-editor/index.js
 ```
 
 ## Releases
 
 Bump `version` in `pyproject.toml` and push to `main` →
-`Comfy-Org/publish-node-action` publishes to the Comfy Registry. Requires
-the `REGISTRY_ACCESS_TOKEN` repo secret. Use conventional commits;
-release-please maintains `CHANGELOG.md` and the version bump PR.
+`publish.yml` runs `bun install && bun run build` then
+`Comfy-Org/publish-node-action` publishes to the Comfy Registry (the built
+`web/dist/` is force-shipped via `[tool.comfy] includes`). Requires the
+`REGISTRY_ACCESS_TOKEN` repo secret. Use conventional commits; release-please
+maintains `CHANGELOG.md` and the version bump PR.
+
+## Architecture Decision Records
+
+| ADR | Status | Decision |
+|-----|--------|----------|
+| [0001](docs/blueprint/adrs/0001-adopt-typescript-bun-build.md) | Accepted | TypeScript source built to `web/dist/` via `bun build`; consume `@laurigates/comfy-modal-kit` inline. Supersedes the prior (CLAUDE.md-documented) vanilla-JS + vendored-primitives architecture. |

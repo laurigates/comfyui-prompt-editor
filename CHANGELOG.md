@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.5...comfyui-prompt-editor-v0.1.6) (2026-06-08)
+
+
+### Bug Fixes
+
+* add Comfy Registry icon/banner and publish on release event ([#13](https://github.com/laurigates/comfyui-prompt-editor/issues/13)) ([60a5181](https://github.com/laurigates/comfyui-prompt-editor/commit/60a51811586dff3af62e4233808e09be026ddee1))
+
 ## [0.1.5](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.4...comfyui-prompt-editor-v0.1.5) (2026-06-06)
 
 

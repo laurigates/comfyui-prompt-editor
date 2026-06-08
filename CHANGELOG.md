@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.6...comfyui-prompt-editor-v0.1.7) (2026-06-08)
+
+
+### Bug Fixes
+
+* ship web/dist in registry tarball (pin publish-node-action skip_checkout) ([#16](https://github.com/laurigates/comfyui-prompt-editor/issues/16)) ([2e37bd7](https://github.com/laurigates/comfyui-prompt-editor/commit/2e37bd77e380de158ed6eb3688ceb400fac1e7ed))
+
 ## [0.1.6](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.5...comfyui-prompt-editor-v0.1.6) (2026-06-08)
 
 

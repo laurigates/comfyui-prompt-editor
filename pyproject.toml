@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-prompt-editor"
 description = "Full-screen touch editor for multiline prompt widgets: weight steppers, embedding/LoRA insert palette, and a token counter."
-version = "0.1.6"
+version = "0.1.5"
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10"

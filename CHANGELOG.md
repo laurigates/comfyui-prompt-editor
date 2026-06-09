@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.7...comfyui-prompt-editor-v0.1.8) (2026-06-09)
+
+
+### Bug Fixes
+
+* **registry:** ship runtime-only files in the Comfy Registry tarball ([#19](https://github.com/laurigates/comfyui-prompt-editor/issues/19)) ([d26b90d](https://github.com/laurigates/comfyui-prompt-editor/commit/d26b90d7403851bb7011d8933cc057360fd936c5))
+
 ## [0.1.7](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.6...comfyui-prompt-editor-v0.1.7) (2026-06-08)
 
 

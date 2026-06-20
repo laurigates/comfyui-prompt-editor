@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.9](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.8...comfyui-prompt-editor-v0.1.9) (2026-06-20)
+
+
+### Bug Fixes
+
+* pin comfyui-frontend-package to 3-part version (&gt;=1.40.0) ([#25](https://github.com/laurigates/comfyui-prompt-editor/issues/25)) ([36ce89f](https://github.com/laurigates/comfyui-prompt-editor/commit/36ce89fcfa83a3cc1afdfe66f8d0b071512481ef))
+
+
+### Miscellaneous
+
+* **deps:** remove Dependabot config, consolidate on Renovate ([#23](https://github.com/laurigates/comfyui-prompt-editor/issues/23)) ([93319f1](https://github.com/laurigates/comfyui-prompt-editor/commit/93319f1c18f8c9c919ec8e8dd2833d46d9149437))
+
 ## [0.1.8](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.7...comfyui-prompt-editor-v0.1.8) (2026-06-09)
 
 

@@ -6,20 +6,24 @@
 //
 // Pattern (shared with gallery-loader / sampler-info):
 //   registerExtension -> enhance each node (on create AND on graph load) ->
-//   detect multiline STRING widgets BY NAME / by the multiline option flag ->
-//   wrap widget.onPointerDown (Strategy A) AND add an explicit ⤢ expand button
-//   widget (Strategy B) -> open a full-viewport HTML textarea modal instead of
-//   editing the keyboard-occluded on-canvas sliver. Additive + mobile-first:
+//   pin a distinct "⤢ Edit fields" button to the TOP of every node that has
+//   editable widgets (the universal entry point), AND wrap onPointerDown on
+//   multiline STRING widgets (Strategy A) so tapping the on-canvas sliver opens
+//   the editor focused on that field -> open a full-viewport HTML modal instead
+//   of editing the keyboard-occluded on-canvas sliver. Additive + mobile-first:
 //   always chain to the original handler, write back only on explicit confirm,
-//   and fall back to the native textarea on dismiss / error.
-//   Requires the modern Vue frontend's onPointerDown hook
-//   (comfyui-frontend-package >= 1.40) for Strategy A; Strategy B is the
-//   version-skew safety net.
+//   and fall back to the native control on dismiss / error.
+//   Strategy A needs the modern Vue frontend's onPointerDown hook
+//   (comfyui-frontend-package >= 1.40); the top button is the version-skew
+//   safety net and the entry point on nodes with no text widget at all.
 //
-// v0.1 scope: the full-screen editor only. The weight ± stepper is included
-// because it is a pure DOM op on the textarea (came for free). The weight
-// toolbar proper, token counter, embedding palette, and tabbed multi-encoder
-// editing are v0.2+.
+// Scope: the modal is an ALL-FIELDS node editor. Tapping any multiline text
+// widget (the detection target) opens a touch form with a control for EVERY
+// editable widget on the node — multiline + single-line STRING, INT/FLOAT,
+// combos, and booleans — with the tapped widget focused. Each multiline field
+// keeps its own weight ± steppers. Write-back is per-field and only churns
+// widgets whose value actually changed, so a cancelled edit leaves the
+// serialized workflow byte-for-byte unchanged.
 //
 // The modal-shell primitive is consumed from @laurigates/comfy-modal-kit
 // (bundled INLINE into the build output). The fzf-lite fuzzy matcher also
@@ -53,9 +57,8 @@ interface PromptWidget {
   inputEl?: { tagName?: string; value?: string } | null;
   callback?: (value: string, canvas: unknown, node: unknown) => void;
   onPointerDown?: ((pointer: unknown, node: unknown, canvas: unknown) => unknown) | undefined;
-  // Idempotency guards stamped on the widget so each strategy applies once.
+  // Idempotency guard stamped on the widget so the tap interception applies once.
   _promptEditorPointerPatched?: boolean;
-  _promptEditorButtonAdded?: boolean;
 }
 
 interface PromptNode {
@@ -68,6 +71,8 @@ interface PromptNode {
     callback: () => void,
     options?: Record<string, unknown>,
   ) => PromptWidget | undefined;
+  // Idempotency guard: the node-level "Edit fields" button is added once.
+  _promptEditorNodeButtonAdded?: boolean;
 }
 
 // ============================================================
@@ -265,6 +270,50 @@ export function bumpWeight(
 }
 
 // ============================================================
+// Editable-widget classification — the all-fields form
+// ============================================================
+//
+// The editor edits EVERY editable widget on a node, not just the prompt text.
+// We bucket each widget into one of a small set of control kinds so the modal
+// can render the right input. Classification is pure (object -> kind), so it is
+// unit-tested alongside isTargetWidget.
+//
+// Buckets:
+//   - "multiline" : multiline STRING (textarea + weight steppers)
+//   - "text"      : single-line STRING (text input)
+//   - "number"    : INT / FLOAT (number input)
+//   - "combo"     : fixed values list (select)
+//   - "boolean"   : BOOLEAN (toggle)
+//   - null        : not editable here (buttons, converted/linked inputs, …)
+
+export type WidgetKind = "multiline" | "text" | "number" | "combo" | "boolean";
+
+export function classifyEditableWidget(w: unknown): WidgetKind | null {
+  if (!w || typeof w !== "object") return null;
+  const widget = w as PromptWidget & { hidden?: boolean };
+  const typeStr = typeof widget.type === "string" ? widget.type.toLowerCase() : "";
+
+  // Skip non-data widgets and widgets converted to graph inputs.
+  if (typeStr === "button" || typeStr === "converted-widget") return null;
+  if (widget.hidden === true) return null;
+  // Our own serialize:false expand button (and any unnamed control) is skipped.
+  if (typeof widget.name !== "string" || widget.name === "") return null;
+
+  // A fixed values list marks a combo regardless of value type.
+  if (Array.isArray(widget.options?.values)) return "combo";
+
+  // Multiline STRING first — the original prompt-editor target.
+  if (isMultilineStringWidget(widget)) return "multiline";
+
+  const val = widget.value;
+  if (typeof val === "boolean" || typeStr === "toggle") return "boolean";
+  if (typeof val === "number" || typeStr === "number") return "number";
+  if (typeof val === "string" || typeStr === "text" || typeStr === "string") return "text";
+
+  return null;
+}
+
+// ============================================================
 // Modal CSS (pack-specific; modal-shell injects its own .cmp-* styles)
 // ============================================================
 
@@ -272,9 +321,23 @@ const CSS = `
 .pe-wrap {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 14px;
     height: 100%;
     min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 2px;
+}
+.pe-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.pe-label {
+    color: #b8b8c0;
+    font-size: 13px;
+    font-weight: 600;
 }
 .pe-bar {
     display: flex;
@@ -308,16 +371,34 @@ const CSS = `
     border-color: #3a6ec0;
     color: #fff;
     font-weight: 600;
-    margin-left: auto;
 }
 .pe-btn-primary:hover {
     background: #366ac0;
 }
-.pe-textarea {
-    flex: 1;
+.pe-input,
+.pe-select {
     width: 100%;
     box-sizing: border-box;
-    min-height: 220px;
+    min-height: 44px;
+    background: #12121a;
+    border: 1px solid #3a3a44;
+    border-radius: 6px;
+    color: #e8e8ea;
+    padding: 0 12px;
+    /* 16px prevents iOS auto-zoom on focus. */
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+    touch-action: manipulation;
+}
+.pe-input:focus,
+.pe-select:focus {
+    border-color: #6ba6ff;
+}
+.pe-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 160px;
     resize: vertical;
     background: #12121a;
     border: 1px solid #3a3a44;
@@ -334,6 +415,17 @@ const CSS = `
 }
 .pe-textarea:focus {
     border-color: #6ba6ff;
+}
+.pe-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+}
+.pe-toggle input {
+    width: 24px;
+    height: 24px;
+    touch-action: manipulation;
 }
 .pe-hint {
     color: #888;
@@ -359,14 +451,14 @@ function ensureStyle(): void {
 // see the new value, then mark the canvas dirty. We never write on dismiss, so
 // a cancelled edit leaves the serialized workflow byte-for-byte unchanged.
 
-function applyValue(widget: PromptWidget, node: PromptNode | null, value: string): void {
-  if (typeof value !== "string") return;
+function applyWidgetValue(widget: PromptWidget, node: PromptNode | null, value: unknown): void {
   widget.value = value;
-  if (widget.inputEl && typeof widget.inputEl.value === "string") {
+  // Sync the DOM control (string widgets render a textarea/input via inputEl).
+  if (widget.inputEl && typeof widget.inputEl.value === "string" && typeof value === "string") {
     widget.inputEl.value = value;
   }
   try {
-    widget.callback?.call(widget, value, app.canvas, node);
+    widget.callback?.call(widget, value as string, app.canvas, node);
   } catch (e) {
     console.warn(`[${EXT_NAME}] widget callback threw`, e);
   }
@@ -375,42 +467,154 @@ function applyValue(widget: PromptWidget, node: PromptNode | null, value: string
 }
 
 // ============================================================
-// Modal — full-viewport textarea editor
+// Field rows — one editable control per widget on the node
 // ============================================================
+//
+// Each field knows how to read its current control value back in the widget's
+// native type, so commit() only churns widgets whose value actually changed.
 
-function openEditor(
-  widget: PromptWidget,
-  node: PromptNode | null,
-): ReturnType<typeof openModalShell> {
-  ensureStyle();
+interface FieldRow {
+  widget: PromptWidget;
+  kind: WidgetKind;
+  el: HTMLElement;
+  /** Read the control's current value coerced to the widget's native type. */
+  read: () => unknown;
+  /** Whether the control differs from the widget's value at open time. */
+  changed: () => boolean;
+  /** Focus this field's primary control (used for the tapped widget). */
+  focus: () => void;
+}
 
-  const initial = typeof widget?.value === "string" ? widget.value : "";
+function makeBtn(label: string, title: string, cls?: string): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `pe-btn${cls ? ` ${cls}` : ""}`;
+  b.textContent = label;
+  if (title) b.title = title;
+  return b;
+}
 
-  const wrap = document.createElement("div");
-  wrap.className = "pe-wrap";
+function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
+  const el = document.createElement("div");
+  el.className = "pe-field";
 
-  // Toolbar: weight steppers (free pure-DOM op) + a hint. The weight toolbar
-  // proper is v0.2; these two steppers are all that comes for free here.
-  const bar = document.createElement("div");
-  bar.className = "pe-bar";
+  const label = document.createElement("label");
+  label.className = "pe-label";
+  label.textContent = widget.name ?? "";
+  el.appendChild(label);
 
-  const makeBtn = (label: string, title: string, cls?: string): HTMLButtonElement => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = `pe-btn${cls ? ` ${cls}` : ""}`;
-    b.textContent = label;
-    if (title) b.title = title;
-    return b;
-  };
+  if (kind === "boolean") {
+    const initial = widget.value === true;
+    const row = document.createElement("div");
+    row.className = "pe-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = initial;
+    const labelText = document.createElement("span");
+    labelText.className = "pe-hint";
+    const sync = (): void => {
+      labelText.textContent = input.checked ? "enabled" : "disabled";
+    };
+    sync();
+    input.addEventListener("change", sync);
+    row.append(input, labelText);
+    el.appendChild(row);
+    return {
+      widget,
+      kind,
+      el,
+      read: () => input.checked,
+      changed: () => input.checked !== initial,
+      focus: () => input.focus(),
+    };
+  }
 
-  const downBtn = makeBtn("weight −", "Decrease weight of selection (or the word at the caret)");
-  const upBtn = makeBtn("weight +", "Increase weight of selection (or the word at the caret)");
-  const hint = document.createElement("span");
-  hint.className = "pe-hint";
-  hint.textContent = "select a token, or just place the caret in a word, then weight ±";
+  if (kind === "combo") {
+    const values = (widget.options?.values as unknown[] | undefined) ?? [];
+    const initial = widget.value;
+    const select = document.createElement("select");
+    select.className = "pe-select";
+    for (const v of values) {
+      const opt = document.createElement("option");
+      opt.value = String(v);
+      opt.textContent = String(v);
+      if (v === initial) opt.selected = true;
+      select.appendChild(opt);
+    }
+    el.appendChild(select);
+    // Map the chosen option string back to the original-typed list entry.
+    const read = (): unknown => {
+      const hit = values.find((v) => String(v) === select.value);
+      return hit === undefined ? select.value : hit;
+    };
+    return {
+      widget,
+      kind,
+      el,
+      read,
+      changed: () => read() !== initial,
+      focus: () => select.focus(),
+    };
+  }
 
-  bar.append(downBtn, upBtn, hint);
+  if (kind === "number") {
+    const initial = typeof widget.value === "number" ? widget.value : Number(widget.value) || 0;
+    const opts = widget.options ?? {};
+    // Integer widget: integer-valued and no fractional step (seed, steps, …).
+    const stepOpt = opts.step;
+    const isInt =
+      Number.isInteger(initial) && (typeof stepOpt !== "number" || Number.isInteger(stepOpt));
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "pe-input";
+    input.value = String(initial);
+    input.inputMode = "decimal";
+    if (typeof opts.min === "number") input.min = String(opts.min);
+    if (typeof opts.max === "number") input.max = String(opts.max);
+    if (typeof opts.step === "number") input.step = String(opts.step);
+    el.appendChild(input);
+    const read = (): number => {
+      const n = Number.parseFloat(input.value);
+      if (!Number.isFinite(n)) return initial;
+      let v = n;
+      if (typeof opts.min === "number") v = Math.max(opts.min, v);
+      if (typeof opts.max === "number") v = Math.min(opts.max, v);
+      // Preserve integer-valued widgets (seed, steps, …).
+      return isInt ? Math.round(v) : v;
+    };
+    return {
+      widget,
+      kind,
+      el,
+      read,
+      changed: () => read() !== initial,
+      focus: () => input.focus(),
+    };
+  }
 
+  if (kind === "text") {
+    const initial = typeof widget.value === "string" ? widget.value : "";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "pe-input";
+    input.value = initial;
+    input.spellcheck = false;
+    input.autocapitalize = "off";
+    input.autocomplete = "off";
+    input.setAttribute("autocorrect", "off");
+    el.appendChild(input);
+    return {
+      widget,
+      kind,
+      el,
+      read: () => input.value,
+      changed: () => input.value !== initial,
+      focus: () => input.focus(),
+    };
+  }
+
+  // kind === "multiline" — textarea with weight steppers.
+  const initial = typeof widget.value === "string" ? widget.value : "";
   const textarea = document.createElement("textarea");
   textarea.className = "pe-textarea";
   textarea.value = initial;
@@ -419,22 +623,11 @@ function openEditor(
   textarea.autocomplete = "off";
   textarea.setAttribute("autocorrect", "off");
 
-  wrap.append(bar, textarea);
-
-  let committed = false;
-  const commit = (): void => {
-    if (committed) return;
-    committed = true;
-    try {
-      // Only churn the widget when the text actually changed.
-      if (textarea.value !== initial) {
-        applyValue(widget, node, textarea.value);
-      }
-    } catch (e) {
-      console.warn(`[${EXT_NAME}] write-back failed`, e);
-    }
-    modal.close();
-  };
+  const bar = document.createElement("div");
+  bar.className = "pe-bar";
+  const downBtn = makeBtn("weight −", "Decrease weight of selection (or the word at the caret)");
+  const upBtn = makeBtn("weight +", "Increase weight of selection (or the word at the caret)");
+  bar.append(downBtn, upBtn);
 
   const stepWeight = (delta: number): void => {
     try {
@@ -451,13 +644,76 @@ function openEditor(
   downBtn.addEventListener("click", () => stepWeight(-0.1));
   upBtn.addEventListener("click", () => stepWeight(0.1));
 
+  el.append(bar, textarea);
+  return {
+    widget,
+    kind,
+    el,
+    read: () => textarea.value,
+    changed: () => textarea.value !== initial,
+    focus: () => {
+      textarea.focus();
+      const len = textarea.value.length;
+      textarea.setSelectionRange(len, len);
+    },
+  };
+}
+
+// ============================================================
+// Modal — full-viewport all-fields node editor
+// ============================================================
+
+function openEditor(
+  focusWidget: PromptWidget | null,
+  node: PromptNode | null,
+): ReturnType<typeof openModalShell> {
+  ensureStyle();
+
+  const wrap = document.createElement("div");
+  wrap.className = "pe-wrap";
+
+  // Build a field for every editable widget on the node, in node order.
+  const fields: FieldRow[] = [];
+  for (const w of node?.widgets ?? []) {
+    const kind = classifyEditableWidget(w);
+    if (!kind) continue;
+    const field = buildField(w, kind);
+    fields.push(field);
+    wrap.appendChild(field.el);
+  }
+
+  // Degenerate fallback: nothing classified (e.g. a lone text widget the
+  // classifier somehow skipped) → still edit the tapped widget as multiline.
+  if (fields.length === 0 && focusWidget) {
+    const field = buildField(focusWidget, "multiline");
+    fields.push(field);
+    wrap.appendChild(field.el);
+  }
+
+  let committed = false;
+  const commit = (): void => {
+    if (committed) return;
+    committed = true;
+    for (const f of fields) {
+      try {
+        if (f.changed()) applyWidgetValue(f.widget, node, f.read());
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] write-back failed for ${f.widget.name}`, e);
+      }
+    }
+    modal.close();
+  };
+
+  const nodeTitle =
+    (node as unknown as { title?: string; type?: string } | null)?.title ??
+    (node as unknown as { type?: string } | null)?.type ??
+    "node";
+
   const modal = openModalShell({
-    title: "Edit prompt",
-    subtitle: widget?.name,
-    // No fuzzy search row — this is a free-text editor, not a picker.
+    title: "Edit node",
+    subtitle: nodeTitle,
     showSearch: false,
     showFooter: true,
-    // Full-viewport on mobile; generous on desktop.
     width: "min(960px, calc(100vw - 16px))",
     height: "min(92vh, 900px)",
     footerLeftHTML: '<span class="pe-hint">Cmd/Ctrl+Enter to save · Esc to cancel</span>',
@@ -467,33 +723,25 @@ function openEditor(
         commit();
       }
     },
-    // onClose fires for BOTH the save button and a dismiss (Esc / backdrop).
-    // If we never committed, this was a cancel → leave the widget untouched.
     onClose: () => {},
   });
 
-  // modal-shell's contract: the consumer fills `modal.bodyEl` AFTER the shell
-  // is opened (there is no `body` option — see openModalShell's opts). Mirror
-  // gallery-loader's `modal.bodyEl.appendChild(...)`. Without this the dialog
-  // renders empty.
   modal.bodyEl.appendChild(wrap);
 
-  // A primary "Save" action: the shell's toolbar/search row is for pickers, so
-  // append the Save button into our own toolbar row (already inside `wrap`).
+  // A primary "Save" action in the footer-right cell.
   const saveBtn = makeBtn("Save", "Save (Cmd/Ctrl+Enter)", "pe-btn-primary");
   saveBtn.addEventListener("click", commit);
-  bar.appendChild(saveBtn);
+  modal.footerEl.appendChild(saveBtn);
 
-  // Seed selection at the end and lift the textarea above the soft keyboard.
-  // Defer past the opening tap so iOS doesn't fight the focus, mirroring
-  // modal-shell's own deferred search focus.
+  // Focus the widget the user actually tapped, scrolling it into view above the
+  // soft keyboard. Defer past the opening tap so iOS doesn't fight the focus.
   requestAnimationFrame(() => {
     try {
-      textarea.focus();
-      const len = textarea.value.length;
-      textarea.setSelectionRange(len, len);
-      // Scroll the editor into view above the mobile keyboard.
-      textarea.scrollIntoView({ block: "center", behavior: "smooth" });
+      const target = fields.find((f) => f.widget === focusWidget) ?? fields[0];
+      if (target) {
+        target.focus();
+        target.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
     } catch (e) {
       console.warn(`[${EXT_NAME}] focus/scroll failed`, e);
     }
@@ -508,69 +756,73 @@ function openEditor(
 
 function enhanceNode(node: PromptNode | null): void {
   if (!node?.widgets) return;
+
+  // Does the node have any widget the all-fields editor can edit? The button
+  // (and the tap interception) are pointless on a node with nothing to edit
+  // (e.g. a pure image preview / reroute).
+  const hasEditable = node.widgets.some((w) => classifyEditableWidget(w) !== null);
+  if (!hasEditable) return;
+
+  // Strategy A: on text widgets, wrap onPointerDown so tapping the on-canvas
+  // sliver opens the all-fields editor focused on THAT widget. Chain the
+  // original first; only open ours if the original didn't consume the event.
   for (const w of node.widgets) {
-    // Generic multiline-string detection OR the name fast-path — both gated so
-    // a combo / number widget never matches (see isTargetWidget).
     if (!isTargetWidget(w)) continue;
-
-    // Strategy A: wrap onPointerDown. Chain the original first; only open our
-    // editor if the original didn't consume the event.
-    if (!w._promptEditorPointerPatched) {
-      w._promptEditorPointerPatched = true;
-      const origDown = w.onPointerDown;
-      w.onPointerDown = function (
-        this: PromptWidget,
-        pointer: unknown,
-        ownerNode: unknown,
-        canvas: unknown,
-      ): unknown {
-        try {
-          if (typeof origDown === "function") {
-            const consumed = origDown.call(this, pointer, ownerNode, canvas);
-            if (consumed) return consumed;
-          }
-          openEditor(w, (ownerNode as PromptNode) || node);
-          return true; // consume — suppress the native sliver edit
-        } catch (e) {
-          console.warn(`[${EXT_NAME}] editor open failed`, e);
-          return false; // fall back to native textarea on error
-        }
-      };
-    }
-
-    // Strategy B safety net: an explicit ⤢ expand button widget keeps the
-    // editor reachable even if a future frontend drops the onPointerDown hook.
-    // serialize:false so it never enters the saved workflow. Guard so we add at
-    // most one button per target widget.
-    if (!w._promptEditorButtonAdded) {
-      w._promptEditorButtonAdded = true;
+    if (w._promptEditorPointerPatched) continue;
+    w._promptEditorPointerPatched = true;
+    const origDown = w.onPointerDown;
+    w.onPointerDown = function (
+      this: PromptWidget,
+      pointer: unknown,
+      ownerNode: unknown,
+      canvas: unknown,
+    ): unknown {
       try {
-        const btn = node.addWidget?.(
-          "button",
-          `⤢ ${w.name}`,
-          null,
-          () => {
-            try {
-              openEditor(w, node);
-            } catch (e) {
-              console.warn(`[${EXT_NAME}] open from button failed`, e);
-            }
-          },
-          { serialize: false },
-        );
-        // Drop the expand button just after its target widget for proximity.
-        if (btn && node.widgets) {
-          const targetIdx = node.widgets.indexOf(w);
-          const btnIdx = node.widgets.indexOf(btn);
-          if (targetIdx !== -1 && btnIdx !== -1 && btnIdx !== targetIdx + 1) {
-            node.widgets.splice(btnIdx, 1);
-            node.widgets.splice(targetIdx + 1, 0, btn);
-          }
+        if (typeof origDown === "function") {
+          const consumed = origDown.call(this, pointer, ownerNode, canvas);
+          if (consumed) return consumed;
         }
-        node.setDirtyCanvas?.(true, true);
+        openEditor(w, (ownerNode as PromptNode) || node);
+        return true; // consume — suppress the native sliver edit
       } catch (e) {
-        console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);
+        console.warn(`[${EXT_NAME}] editor open failed`, e);
+        return false; // fall back to native control on error
       }
+    };
+  }
+
+  // A distinct node-level "Edit fields" button pinned to the TOP of every node
+  // with editable widgets. This is the universal entry point (works on nodes
+  // with no text widget at all) and doubles as the version-skew safety net for
+  // Strategy A. serialize:false so it never enters the saved workflow. Opens
+  // with no specific focus (the first field). Added at most once per node.
+  if (!node._promptEditorNodeButtonAdded) {
+    node._promptEditorNodeButtonAdded = true;
+    try {
+      const btn = node.addWidget?.(
+        "button",
+        "⤢ Edit fields",
+        null,
+        () => {
+          try {
+            openEditor(null, node);
+          } catch (e) {
+            console.warn(`[${EXT_NAME}] open from button failed`, e);
+          }
+        },
+        { serialize: false },
+      );
+      // Pin the button to the very top of the widget stack.
+      if (btn && node.widgets) {
+        const btnIdx = node.widgets.indexOf(btn);
+        if (btnIdx > 0) {
+          node.widgets.splice(btnIdx, 1);
+          node.widgets.unshift(btn);
+        }
+      }
+      node.setDirtyCanvas?.(true, true);
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);
     }
   }
 }

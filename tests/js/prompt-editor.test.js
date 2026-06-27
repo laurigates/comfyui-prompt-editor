@@ -2,10 +2,60 @@ import { fuzzyRank } from "@laurigates/comfy-modal-kit";
 import { describe, expect, it } from "vitest";
 import {
   bumpWeight,
+  classifyEditableWidget,
   isMultilineStringWidget,
   isTargetWidget,
   TARGET_WIDGET_NAMES,
 } from "../../src/index.ts";
+
+// classifyEditableWidget buckets every node widget into a control kind for the
+// all-fields editor. Pure object->kind, so it is unit-tested.
+describe("classifyEditableWidget", () => {
+  it("buckets a multiline STRING as 'multiline'", () => {
+    expect(classifyEditableWidget({ name: "text", options: { multiline: true }, value: "" })).toBe(
+      "multiline",
+    );
+  });
+
+  it("buckets a single-line STRING as 'text'", () => {
+    expect(classifyEditableWidget({ name: "filename", options: {}, value: "out.png" })).toBe(
+      "text",
+    );
+  });
+
+  it("buckets a numeric widget as 'number'", () => {
+    expect(classifyEditableWidget({ name: "steps", options: {}, value: 20 })).toBe("number");
+  });
+
+  it("buckets a fixed-values widget as 'combo'", () => {
+    expect(
+      classifyEditableWidget({
+        name: "sampler_name",
+        options: { values: ["euler"] },
+        value: "euler",
+      }),
+    ).toBe("combo");
+  });
+
+  it("buckets a boolean widget as 'boolean'", () => {
+    expect(classifyEditableWidget({ name: "enabled", options: {}, value: true })).toBe("boolean");
+    expect(classifyEditableWidget({ name: "toggle_w", type: "toggle", value: false })).toBe(
+      "boolean",
+    );
+  });
+
+  it("skips button, converted, hidden, and unnamed widgets", () => {
+    expect(classifyEditableWidget({ name: "go", type: "button" })).toBeNull();
+    expect(classifyEditableWidget({ name: "x", type: "converted-widget", value: "y" })).toBeNull();
+    expect(classifyEditableWidget({ name: "h", options: {}, value: "v", hidden: true })).toBeNull();
+    expect(classifyEditableWidget({ name: "", options: {}, value: "v" })).toBeNull();
+  });
+
+  it("rejects nullish input defensively", () => {
+    expect(classifyEditableWidget(null)).toBeNull();
+    expect(classifyEditableWidget(undefined)).toBeNull();
+  });
+});
 
 // The fuzzy primitive (now consumed from @laurigates/comfy-modal-kit) must
 // remain importable (used by future v0.4 embedding palette).

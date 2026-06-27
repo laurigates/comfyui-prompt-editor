@@ -386,13 +386,51 @@ function bumpWeight(text, selStart, selEnd, delta) {
   const out = src.slice(0, a) + replacement + src.slice(b);
   return { text: out, selStart: a, selEnd: a + replacement.length };
 }
+function classifyEditableWidget(w) {
+  if (!w || typeof w !== "object")
+    return null;
+  const widget = w;
+  const typeStr = typeof widget.type === "string" ? widget.type.toLowerCase() : "";
+  if (typeStr === "button" || typeStr === "converted-widget")
+    return null;
+  if (widget.hidden === true)
+    return null;
+  if (typeof widget.name !== "string" || widget.name === "")
+    return null;
+  if (Array.isArray(widget.options?.values))
+    return "combo";
+  if (isMultilineStringWidget(widget))
+    return "multiline";
+  const val = widget.value;
+  if (typeof val === "boolean" || typeStr === "toggle")
+    return "boolean";
+  if (typeof val === "number" || typeStr === "number")
+    return "number";
+  if (typeof val === "string" || typeStr === "text" || typeStr === "string")
+    return "text";
+  return null;
+}
 var CSS2 = `
 .pe-wrap {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 14px;
     height: 100%;
     min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 2px;
+}
+.pe-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.pe-label {
+    color: #b8b8c0;
+    font-size: 13px;
+    font-weight: 600;
 }
 .pe-bar {
     display: flex;
@@ -426,16 +464,34 @@ var CSS2 = `
     border-color: #3a6ec0;
     color: #fff;
     font-weight: 600;
-    margin-left: auto;
 }
 .pe-btn-primary:hover {
     background: #366ac0;
 }
-.pe-textarea {
-    flex: 1;
+.pe-input,
+.pe-select {
     width: 100%;
     box-sizing: border-box;
-    min-height: 220px;
+    min-height: 44px;
+    background: #12121a;
+    border: 1px solid #3a3a44;
+    border-radius: 6px;
+    color: #e8e8ea;
+    padding: 0 12px;
+    /* 16px prevents iOS auto-zoom on focus. */
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+    touch-action: manipulation;
+}
+.pe-input:focus,
+.pe-select:focus {
+    border-color: #6ba6ff;
+}
+.pe-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 160px;
     resize: vertical;
     background: #12121a;
     border: 1px solid #3a3a44;
@@ -453,6 +509,17 @@ var CSS2 = `
 .pe-textarea:focus {
     border-color: #6ba6ff;
 }
+.pe-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+}
+.pe-toggle input {
+    width: 24px;
+    height: 24px;
+    touch-action: manipulation;
+}
 .pe-hint {
     color: #888;
     font-size: 12px;
@@ -466,11 +533,9 @@ function ensureStyle2() {
   s.textContent = CSS2;
   document.head.appendChild(s);
 }
-function applyValue(widget, node, value) {
-  if (typeof value !== "string")
-    return;
+function applyWidgetValue(widget, node, value) {
   widget.value = value;
-  if (widget.inputEl && typeof widget.inputEl.value === "string") {
+  if (widget.inputEl && typeof widget.inputEl.value === "string" && typeof value === "string") {
     widget.inputEl.value = value;
   }
   try {
@@ -481,28 +546,132 @@ function applyValue(widget, node, value) {
   node?.setDirtyCanvas?.(true, true);
   app.graph?.setDirtyCanvas?.(true, true);
 }
-function openEditor(widget, node) {
-  ensureStyle2();
-  const initial = typeof widget?.value === "string" ? widget.value : "";
-  const wrap = document.createElement("div");
-  wrap.className = "pe-wrap";
-  const bar = document.createElement("div");
-  bar.className = "pe-bar";
-  const makeBtn = (label, title, cls) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = `pe-btn${cls ? ` ${cls}` : ""}`;
-    b.textContent = label;
-    if (title)
-      b.title = title;
-    return b;
-  };
-  const downBtn = makeBtn("weight −", "Decrease weight of selection (or the word at the caret)");
-  const upBtn = makeBtn("weight +", "Increase weight of selection (or the word at the caret)");
-  const hint = document.createElement("span");
-  hint.className = "pe-hint";
-  hint.textContent = "select a token, or just place the caret in a word, then weight ±";
-  bar.append(downBtn, upBtn, hint);
+function makeBtn(label, title, cls) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `pe-btn${cls ? ` ${cls}` : ""}`;
+  b.textContent = label;
+  if (title)
+    b.title = title;
+  return b;
+}
+function buildField(widget, kind) {
+  const el = document.createElement("div");
+  el.className = "pe-field";
+  const label = document.createElement("label");
+  label.className = "pe-label";
+  label.textContent = widget.name ?? "";
+  el.appendChild(label);
+  if (kind === "boolean") {
+    const initial2 = widget.value === true;
+    const row = document.createElement("div");
+    row.className = "pe-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = initial2;
+    const labelText = document.createElement("span");
+    labelText.className = "pe-hint";
+    const sync = () => {
+      labelText.textContent = input.checked ? "enabled" : "disabled";
+    };
+    sync();
+    input.addEventListener("change", sync);
+    row.append(input, labelText);
+    el.appendChild(row);
+    return {
+      widget,
+      kind,
+      el,
+      read: () => input.checked,
+      changed: () => input.checked !== initial2,
+      focus: () => input.focus()
+    };
+  }
+  if (kind === "combo") {
+    const values = widget.options?.values ?? [];
+    const initial2 = widget.value;
+    const select = document.createElement("select");
+    select.className = "pe-select";
+    for (const v of values) {
+      const opt = document.createElement("option");
+      opt.value = String(v);
+      opt.textContent = String(v);
+      if (v === initial2)
+        opt.selected = true;
+      select.appendChild(opt);
+    }
+    el.appendChild(select);
+    const read = () => {
+      const hit = values.find((v) => String(v) === select.value);
+      return hit === undefined ? select.value : hit;
+    };
+    return {
+      widget,
+      kind,
+      el,
+      read,
+      changed: () => read() !== initial2,
+      focus: () => select.focus()
+    };
+  }
+  if (kind === "number") {
+    const initial2 = typeof widget.value === "number" ? widget.value : Number(widget.value) || 0;
+    const opts = widget.options ?? {};
+    const stepOpt = opts.step;
+    const isInt = Number.isInteger(initial2) && (typeof stepOpt !== "number" || Number.isInteger(stepOpt));
+    const input = document.createElement("input");
+    input.type = "number";
+    input.className = "pe-input";
+    input.value = String(initial2);
+    input.inputMode = "decimal";
+    if (typeof opts.min === "number")
+      input.min = String(opts.min);
+    if (typeof opts.max === "number")
+      input.max = String(opts.max);
+    if (typeof opts.step === "number")
+      input.step = String(opts.step);
+    el.appendChild(input);
+    const read = () => {
+      const n = Number.parseFloat(input.value);
+      if (!Number.isFinite(n))
+        return initial2;
+      let v = n;
+      if (typeof opts.min === "number")
+        v = Math.max(opts.min, v);
+      if (typeof opts.max === "number")
+        v = Math.min(opts.max, v);
+      return isInt ? Math.round(v) : v;
+    };
+    return {
+      widget,
+      kind,
+      el,
+      read,
+      changed: () => read() !== initial2,
+      focus: () => input.focus()
+    };
+  }
+  if (kind === "text") {
+    const initial2 = typeof widget.value === "string" ? widget.value : "";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "pe-input";
+    input.value = initial2;
+    input.spellcheck = false;
+    input.autocapitalize = "off";
+    input.autocomplete = "off";
+    input.setAttribute("autocorrect", "off");
+    el.appendChild(input);
+    return {
+      widget,
+      kind,
+      el,
+      read: () => input.value,
+      changed: () => input.value !== initial2,
+      focus: () => input.focus()
+    };
+  }
+  const initial = typeof widget.value === "string" ? widget.value : "";
   const textarea = document.createElement("textarea");
   textarea.className = "pe-textarea";
   textarea.value = initial;
@@ -510,21 +679,11 @@ function openEditor(widget, node) {
   textarea.autocapitalize = "off";
   textarea.autocomplete = "off";
   textarea.setAttribute("autocorrect", "off");
-  wrap.append(bar, textarea);
-  let committed = false;
-  const commit = () => {
-    if (committed)
-      return;
-    committed = true;
-    try {
-      if (textarea.value !== initial) {
-        applyValue(widget, node, textarea.value);
-      }
-    } catch (e) {
-      console.warn(`[${EXT_NAME}] write-back failed`, e);
-    }
-    modal.close();
-  };
+  const bar = document.createElement("div");
+  bar.className = "pe-bar";
+  const downBtn = makeBtn("weight −", "Decrease weight of selection (or the word at the caret)");
+  const upBtn = makeBtn("weight +", "Increase weight of selection (or the word at the caret)");
+  bar.append(downBtn, upBtn);
   const stepWeight = (delta) => {
     try {
       const start = textarea.selectionStart ?? 0;
@@ -539,9 +698,57 @@ function openEditor(widget, node) {
   };
   downBtn.addEventListener("click", () => stepWeight(-0.1));
   upBtn.addEventListener("click", () => stepWeight(0.1));
+  el.append(bar, textarea);
+  return {
+    widget,
+    kind,
+    el,
+    read: () => textarea.value,
+    changed: () => textarea.value !== initial,
+    focus: () => {
+      textarea.focus();
+      const len = textarea.value.length;
+      textarea.setSelectionRange(len, len);
+    }
+  };
+}
+function openEditor(focusWidget, node) {
+  ensureStyle2();
+  const wrap = document.createElement("div");
+  wrap.className = "pe-wrap";
+  const fields = [];
+  for (const w of node?.widgets ?? []) {
+    const kind = classifyEditableWidget(w);
+    if (!kind)
+      continue;
+    const field = buildField(w, kind);
+    fields.push(field);
+    wrap.appendChild(field.el);
+  }
+  if (fields.length === 0 && focusWidget) {
+    const field = buildField(focusWidget, "multiline");
+    fields.push(field);
+    wrap.appendChild(field.el);
+  }
+  let committed = false;
+  const commit = () => {
+    if (committed)
+      return;
+    committed = true;
+    for (const f of fields) {
+      try {
+        if (f.changed())
+          applyWidgetValue(f.widget, node, f.read());
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] write-back failed for ${f.widget.name}`, e);
+      }
+    }
+    modal.close();
+  };
+  const nodeTitle = node?.title ?? node?.type ?? "node";
   const modal = openModalShell({
-    title: "Edit prompt",
-    subtitle: widget?.name,
+    title: "Edit node",
+    subtitle: nodeTitle,
     showSearch: false,
     showFooter: true,
     width: "min(960px, calc(100vw - 16px))",
@@ -558,13 +765,14 @@ function openEditor(widget, node) {
   modal.bodyEl.appendChild(wrap);
   const saveBtn = makeBtn("Save", "Save (Cmd/Ctrl+Enter)", "pe-btn-primary");
   saveBtn.addEventListener("click", commit);
-  bar.appendChild(saveBtn);
+  modal.footerEl.appendChild(saveBtn);
   requestAnimationFrame(() => {
     try {
-      textarea.focus();
-      const len = textarea.value.length;
-      textarea.setSelectionRange(len, len);
-      textarea.scrollIntoView({ block: "center", behavior: "smooth" });
+      const target = fields.find((f) => f.widget === focusWidget) ?? fields[0];
+      if (target) {
+        target.focus();
+        target.el.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
     } catch (e) {
       console.warn(`[${EXT_NAME}] focus/scroll failed`, e);
     }
@@ -574,49 +782,51 @@ function openEditor(widget, node) {
 function enhanceNode(node) {
   if (!node?.widgets)
     return;
+  const hasEditable = node.widgets.some((w) => classifyEditableWidget(w) !== null);
+  if (!hasEditable)
+    return;
   for (const w of node.widgets) {
     if (!isTargetWidget(w))
       continue;
-    if (!w._promptEditorPointerPatched) {
-      w._promptEditorPointerPatched = true;
-      const origDown = w.onPointerDown;
-      w.onPointerDown = function(pointer, ownerNode, canvas) {
-        try {
-          if (typeof origDown === "function") {
-            const consumed = origDown.call(this, pointer, ownerNode, canvas);
-            if (consumed)
-              return consumed;
-          }
-          openEditor(w, ownerNode || node);
-          return true;
-        } catch (e) {
-          console.warn(`[${EXT_NAME}] editor open failed`, e);
-          return false;
-        }
-      };
-    }
-    if (!w._promptEditorButtonAdded) {
-      w._promptEditorButtonAdded = true;
+    if (w._promptEditorPointerPatched)
+      continue;
+    w._promptEditorPointerPatched = true;
+    const origDown = w.onPointerDown;
+    w.onPointerDown = function(pointer, ownerNode, canvas) {
       try {
-        const btn = node.addWidget?.("button", `⤢ ${w.name}`, null, () => {
-          try {
-            openEditor(w, node);
-          } catch (e) {
-            console.warn(`[${EXT_NAME}] open from button failed`, e);
-          }
-        }, { serialize: false });
-        if (btn && node.widgets) {
-          const targetIdx = node.widgets.indexOf(w);
-          const btnIdx = node.widgets.indexOf(btn);
-          if (targetIdx !== -1 && btnIdx !== -1 && btnIdx !== targetIdx + 1) {
-            node.widgets.splice(btnIdx, 1);
-            node.widgets.splice(targetIdx + 1, 0, btn);
-          }
+        if (typeof origDown === "function") {
+          const consumed = origDown.call(this, pointer, ownerNode, canvas);
+          if (consumed)
+            return consumed;
         }
-        node.setDirtyCanvas?.(true, true);
+        openEditor(w, ownerNode || node);
+        return true;
       } catch (e) {
-        console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);
+        console.warn(`[${EXT_NAME}] editor open failed`, e);
+        return false;
       }
+    };
+  }
+  if (!node._promptEditorNodeButtonAdded) {
+    node._promptEditorNodeButtonAdded = true;
+    try {
+      const btn = node.addWidget?.("button", "⤢ Edit fields", null, () => {
+        try {
+          openEditor(null, node);
+        } catch (e) {
+          console.warn(`[${EXT_NAME}] open from button failed`, e);
+        }
+      }, { serialize: false });
+      if (btn && node.widgets) {
+        const btnIdx = node.widgets.indexOf(btn);
+        if (btnIdx > 0) {
+          node.widgets.splice(btnIdx, 1);
+          node.widgets.unshift(btn);
+        }
+      }
+      node.setDirtyCanvas?.(true, true);
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);
     }
   }
 }
@@ -642,6 +852,7 @@ app.registerExtension({
 export {
   isTargetWidget,
   isMultilineStringWidget,
+  classifyEditableWidget,
   bumpWeight,
   TARGET_WIDGET_NAMES
 };

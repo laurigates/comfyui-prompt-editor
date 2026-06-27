@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.9...comfyui-prompt-editor-v0.1.10) (2026-06-26)
+
+
+### Bug Fixes
+
+* **dist:** commit web/dist so git-based updates carry the built frontend ([#31](https://github.com/laurigates/comfyui-prompt-editor/issues/31)) ([e907d64](https://github.com/laurigates/comfyui-prompt-editor/commit/e907d643f0aef81ea92f1aa0319ac1d8b336e719))
+
 ## [0.1.9](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.8...comfyui-prompt-editor-v0.1.9) (2026-06-20)
 
 

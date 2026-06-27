@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.10...comfyui-prompt-editor-v0.1.11) (2026-06-27)
+
+
+### Features
+
+* all-fields node editor reachable on every node ([#34](https://github.com/laurigates/comfyui-prompt-editor/issues/34)) ([8c54158](https://github.com/laurigates/comfyui-prompt-editor/commit/8c541580414a2701b6eff89f2ca6973254841d24))
+
 ## [0.1.10](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.9...comfyui-prompt-editor-v0.1.10) (2026-06-26)
 
 

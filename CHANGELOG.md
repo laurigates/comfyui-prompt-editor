@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.11...comfyui-prompt-editor-v0.1.12) (2026-06-28)
+
+
+### Miscellaneous
+
+* sync uv.lock and auto-bump it via release-please ([#36](https://github.com/laurigates/comfyui-prompt-editor/issues/36)) ([72b79ea](https://github.com/laurigates/comfyui-prompt-editor/commit/72b79ea261b78178cb8df36267192d0bc45e0179))
+
 ## [0.1.11](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.10...comfyui-prompt-editor-v0.1.11) (2026-06-27)
 
 

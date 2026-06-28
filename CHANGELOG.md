@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.12...comfyui-prompt-editor-v0.1.13) (2026-06-28)
+
+
+### Bug Fixes
+
+* **modal:** preserve numeric widget types and never serialize NaN ([#39](https://github.com/laurigates/comfyui-prompt-editor/issues/39)) ([b8f6c31](https://github.com/laurigates/comfyui-prompt-editor/commit/b8f6c314f9ed83afffc7e21e5600b1fbebc3db6e))
+
 ## [0.1.12](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.11...comfyui-prompt-editor-v0.1.12) (2026-06-28)
 
 

@@ -410,6 +410,31 @@ function classifyEditableWidget(w) {
     return "text";
   return null;
 }
+function resolveNumberFormat(options) {
+  const opts = options ?? {};
+  const precision = opts.precision;
+  const step2 = opts.step2;
+  const legacyStep = opts.step;
+  let isInt;
+  if (typeof precision === "number") {
+    isInt = precision === 0;
+  } else if (typeof step2 === "number") {
+    isInt = Number.isInteger(step2);
+  } else if (typeof legacyStep === "number") {
+    isInt = Number.isInteger(legacyStep / 10);
+  } else {
+    isInt = false;
+  }
+  const finite = (v) => typeof v === "number" && Number.isFinite(v) ? v : undefined;
+  const realStep = typeof step2 === "number" ? step2 : typeof legacyStep === "number" ? legacyStep / 10 : undefined;
+  const step = finite(realStep);
+  return {
+    isInt,
+    min: finite(opts.min),
+    max: finite(opts.max),
+    step: step !== undefined && step > 0 ? step : undefined
+  };
+}
 var CSS2 = `
 .pe-wrap {
     display: flex;
@@ -596,7 +621,7 @@ function buildField(widget, kind) {
       const opt = document.createElement("option");
       opt.value = String(v);
       opt.textContent = String(v);
-      if (v === initial2)
+      if (String(v) === String(initial2))
         opt.selected = true;
       select.appendChild(opt);
     }
@@ -610,36 +635,36 @@ function buildField(widget, kind) {
       kind,
       el,
       read,
-      changed: () => read() !== initial2,
+      changed: () => String(read()) !== String(initial2),
       focus: () => select.focus()
     };
   }
   if (kind === "number") {
-    const initial2 = typeof widget.value === "number" ? widget.value : Number(widget.value) || 0;
-    const opts = widget.options ?? {};
-    const stepOpt = opts.step;
-    const isInt = Number.isInteger(initial2) && (typeof stepOpt !== "number" || Number.isInteger(stepOpt));
+    const originalValue = widget.value;
+    const rawInitial = typeof originalValue === "number" ? originalValue : Number(originalValue);
+    const initial2 = Number.isFinite(rawInitial) ? rawInitial : 0;
+    const { isInt, min, max, step } = resolveNumberFormat(widget.options);
     const input = document.createElement("input");
     input.type = "number";
     input.className = "pe-input";
     input.value = String(initial2);
-    input.inputMode = "decimal";
-    if (typeof opts.min === "number")
-      input.min = String(opts.min);
-    if (typeof opts.max === "number")
-      input.max = String(opts.max);
-    if (typeof opts.step === "number")
-      input.step = String(opts.step);
+    input.inputMode = isInt ? "numeric" : "decimal";
+    if (min !== undefined)
+      input.min = String(min);
+    if (max !== undefined)
+      input.max = String(max);
+    if (step !== undefined)
+      input.step = String(step);
     el.appendChild(input);
     const read = () => {
       const n = Number.parseFloat(input.value);
       if (!Number.isFinite(n))
         return initial2;
       let v = n;
-      if (typeof opts.min === "number")
-        v = Math.max(opts.min, v);
-      if (typeof opts.max === "number")
-        v = Math.min(opts.max, v);
+      if (min !== undefined)
+        v = Math.max(min, v);
+      if (max !== undefined)
+        v = Math.min(max, v);
       return isInt ? Math.round(v) : v;
     };
     return {
@@ -647,7 +672,7 @@ function buildField(widget, kind) {
       kind,
       el,
       read,
-      changed: () => read() !== initial2,
+      changed: () => read() !== originalValue,
       focus: () => input.focus()
     };
   }
@@ -850,9 +875,11 @@ app.registerExtension({
   }
 });
 export {
+  resolveNumberFormat,
   isTargetWidget,
   isMultilineStringWidget,
   classifyEditableWidget,
   bumpWeight,
+  buildField,
   TARGET_WIDGET_NAMES
 };

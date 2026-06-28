@@ -314,6 +314,81 @@ export function classifyEditableWidget(w: unknown): WidgetKind | null {
 }
 
 // ============================================================
+// Number-widget formatting — int/float + bounds resolution
+// ============================================================
+
+export interface NumberFormat {
+  /** Round on read (INT widgets); never round FLOAT widgets. */
+  isInt: boolean;
+  /** Lower bound, only when finite (a non-finite bound is ignored). */
+  min: number | undefined;
+  /** Upper bound, only when finite. */
+  max: number | undefined;
+  /** The real (un-scaled) step for the HTML spinner, when positive/finite. */
+  step: number | undefined;
+}
+
+/**
+ * Resolve how a number widget should be parsed and constrained, from its
+ * options. Pure (options -> format), so it is unit-tested.
+ *
+ * Integer-ness is taken from the widget's DECLARED shape, never from "the
+ * current value happens to be whole": FLOAT widgets are frequently whole
+ * (cfg 8.0, denoise 1.0), and rounding a fractional value the user deliberately
+ * typed is destructive. Signals, most authoritative first:
+ *   - `options.precision === 0`   -> integer (ComfyUI's canonical marker)
+ *   - `options.precision > 0`     -> float
+ *   - `options.step2` integral    -> integer (`step2` is the REAL step)
+ *
+ * `options.step` is DEPRECATED and scaled up 10x by the legacy frontend
+ * (a real 0.1 step is stored as 1), so a fractional-step float looks integral
+ * through it — the exact misdetection that silently rounded `cfg` edits to whole
+ * numbers. We recover the real step (÷10) only as a last resort, and otherwise
+ * default to FLOAT (the non-destructive choice).
+ *
+ * `min`/`max` are honoured only when FINITE. A NaN or Infinity bound — some node
+ * specs carry them — would poison `Math.max`/`Math.min` in the reader and make
+ * the field serialize as `NaN`.
+ */
+export function resolveNumberFormat(options: Record<string, unknown> | undefined): NumberFormat {
+  const opts = options ?? {};
+  const precision = opts.precision;
+  const step2 = opts.step2;
+  const legacyStep = opts.step;
+
+  let isInt: boolean;
+  if (typeof precision === "number") {
+    isInt = precision === 0;
+  } else if (typeof step2 === "number") {
+    isInt = Number.isInteger(step2);
+  } else if (typeof legacyStep === "number") {
+    // Legacy step is the real step scaled up 10x; recover it before testing.
+    isInt = Number.isInteger(legacyStep / 10);
+  } else {
+    isInt = false;
+  }
+
+  const finite = (v: unknown): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) ? v : undefined;
+
+  // Prefer the canonical step2; otherwise un-scale the legacy 10x step.
+  const realStep =
+    typeof step2 === "number"
+      ? step2
+      : typeof legacyStep === "number"
+        ? legacyStep / 10
+        : undefined;
+  const step = finite(realStep);
+
+  return {
+    isInt,
+    min: finite(opts.min),
+    max: finite(opts.max),
+    step: step !== undefined && step > 0 ? step : undefined,
+  };
+}
+
+// ============================================================
 // Modal CSS (pack-specific; modal-shell injects its own .cmp-* styles)
 // ============================================================
 
@@ -494,7 +569,7 @@ function makeBtn(label: string, title: string, cls?: string): HTMLButtonElement 
   return b;
 }
 
-function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
+export function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
   const el = document.createElement("div");
   el.className = "pe-field";
 
@@ -538,7 +613,10 @@ function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
       const opt = document.createElement("option");
       opt.value = String(v);
       opt.textContent = String(v);
-      if (v === initial) opt.selected = true;
+      // Match by string: a numeric combo whose value is stored as a string (or
+      // vice-versa) would fail strict `===` and silently default to the first
+      // option, corrupting the saved value.
+      if (String(v) === String(initial)) opt.selected = true;
       select.appendChild(opt);
     }
     el.appendChild(select);
@@ -552,34 +630,40 @@ function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
       kind,
       el,
       read,
-      changed: () => read() !== initial,
+      // Compare by string so a type-only difference (number 8 vs "8") isn't
+      // treated as an edit and churned back through the widget callback.
+      changed: () => String(read()) !== String(initial),
       focus: () => select.focus(),
     };
   }
 
   if (kind === "number") {
-    const initial = typeof widget.value === "number" ? widget.value : Number(widget.value) || 0;
-    const opts = widget.options ?? {};
-    // Integer widget: integer-valued and no fractional step (seed, steps, …).
-    const stepOpt = opts.step;
-    const isInt =
-      Number.isInteger(initial) && (typeof stepOpt !== "number" || Number.isInteger(stepOpt));
+    // The widget's value at open time. Kept verbatim for change detection so a
+    // pre-existing NaN / string value is seen as "changed" and gets normalised
+    // to a finite number on save, while an untouched valid number is not.
+    const originalValue = widget.value;
+    const rawInitial = typeof originalValue === "number" ? originalValue : Number(originalValue);
+    // Seed the control with a finite number — never "NaN"/"" — so the field can
+    // neither display nor round-trip a non-finite value.
+    const initial = Number.isFinite(rawInitial) ? rawInitial : 0;
+    const { isInt, min, max, step } = resolveNumberFormat(widget.options);
     const input = document.createElement("input");
     input.type = "number";
     input.className = "pe-input";
     input.value = String(initial);
-    input.inputMode = "decimal";
-    if (typeof opts.min === "number") input.min = String(opts.min);
-    if (typeof opts.max === "number") input.max = String(opts.max);
-    if (typeof opts.step === "number") input.step = String(opts.step);
+    input.inputMode = isInt ? "numeric" : "decimal";
+    if (min !== undefined) input.min = String(min);
+    if (max !== undefined) input.max = String(max);
+    if (step !== undefined) input.step = String(step);
     el.appendChild(input);
     const read = (): number => {
       const n = Number.parseFloat(input.value);
       if (!Number.isFinite(n)) return initial;
       let v = n;
-      if (typeof opts.min === "number") v = Math.max(opts.min, v);
-      if (typeof opts.max === "number") v = Math.min(opts.max, v);
-      // Preserve integer-valued widgets (seed, steps, …).
+      // Bounds are pre-filtered to finite values, so clamping can never inject
+      // a NaN here. Preserve the widget's native int/float-ness.
+      if (min !== undefined) v = Math.max(min, v);
+      if (max !== undefined) v = Math.min(max, v);
       return isInt ? Math.round(v) : v;
     };
     return {
@@ -587,7 +671,7 @@ function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
       kind,
       el,
       read,
-      changed: () => read() !== initial,
+      changed: () => read() !== originalValue,
       focus: () => input.focus(),
     };
   }

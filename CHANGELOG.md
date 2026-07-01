@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.15](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.14...comfyui-prompt-editor-v0.1.15) (2026-07-01)
+
+
+### Documentation
+
+* correct header comment to match end-append button placement ([#44](https://github.com/laurigates/comfyui-prompt-editor/issues/44)) ([c21d3f6](https://github.com/laurigates/comfyui-prompt-editor/commit/c21d3f6828508a744e17538d4c9b83b61c531dbe))
+
 ## [0.1.14](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.13...comfyui-prompt-editor-v0.1.14) (2026-07-01)
 
 

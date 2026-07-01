@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.13...comfyui-prompt-editor-v0.1.14) (2026-07-01)
+
+
+### Bug Fixes
+
+* stop Edit-fields button from clobbering widget values on open ([#42](https://github.com/laurigates/comfyui-prompt-editor/issues/42)) ([85ebffc](https://github.com/laurigates/comfyui-prompt-editor/commit/85ebffcd585d68500ea045351667cbfe6e20c937))
+
 ## [0.1.13](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.12...comfyui-prompt-editor-v0.1.13) (2026-06-28)
 
 

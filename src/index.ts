@@ -57,6 +57,10 @@ interface PromptWidget {
   inputEl?: { tagName?: string; value?: string } | null;
   callback?: (value: string, canvas: unknown, node: unknown) => void;
   onPointerDown?: ((pointer: unknown, node: unknown, canvas: unknown) => unknown) | undefined;
+  // The frontend's widgets_values save/restore loops key on THIS flag (on the
+  // widget itself), NOT on options.serialize — so a non-serialized widget must
+  // set widget.serialize = false directly. See enhanceNode's button.
+  serialize?: boolean;
   // Idempotency guard stamped on the widget so the tap interception applies once.
   _promptEditorPointerPatched?: boolean;
 }
@@ -875,11 +879,25 @@ function enhanceNode(node: PromptNode | null): void {
     };
   }
 
-  // A distinct node-level "Edit fields" button pinned to the TOP of every node
-  // with editable widgets. This is the universal entry point (works on nodes
-  // with no text widget at all) and doubles as the version-skew safety net for
-  // Strategy A. serialize:false so it never enters the saved workflow. Opens
-  // with no specific focus (the first field). Added at most once per node.
+  // A distinct node-level "Edit fields" button appended to every node with
+  // editable widgets. This is the universal entry point (works on nodes with no
+  // text widget at all) and doubles as the version-skew safety net for Strategy
+  // A. Opens with no specific focus (the first field). Added at most once per
+  // node.
+  //
+  // WORKFLOW-CORRUPTION HAZARD — why this button must be LAST and serialize:false
+  // set on the widget itself:
+  //   The frontend serializes/restores `widgets_values` keyed on
+  //   `widget.serialize` (the flag ON the widget), NOT `widget.options.serialize`
+  //   (all the addWidget option sets). It must be set directly, or the button is
+  //   treated as serializable.
+  //   Even with serialize:false, the SAVE loop assigns `widgets_values[rawIndex]`
+  //   while the RESTORE loop is compacting — so a skipped (serialize:false) widget
+  //   placed BEFORE real widgets leaves a hole (a leading `null`) on save that
+  //   shifts every value by one on the next open. Appending the button to the END
+  //   (addWidget's default — do NOT unshift it to the top) keeps the skipped slot
+  //   past all real values, so the array stays dense and workflows round-trip
+  //   intact. Verified live against comfyui-frontend api-CdYn1OQH.js.
   if (!node._promptEditorNodeButtonAdded) {
     node._promptEditorNodeButtonAdded = true;
     try {
@@ -896,14 +914,9 @@ function enhanceNode(node: PromptNode | null): void {
         },
         { serialize: false },
       );
-      // Pin the button to the very top of the widget stack.
-      if (btn && node.widgets) {
-        const btnIdx = node.widgets.indexOf(btn);
-        if (btnIdx > 0) {
-          node.widgets.splice(btnIdx, 1);
-          node.widgets.unshift(btn);
-        }
-      }
+      // The flag the frontend's widgets_values loops actually check. addWidget
+      // only set widget.options.serialize above; this sets it on the widget.
+      if (btn) btn.serialize = false;
       node.setDirtyCanvas?.(true, true);
     } catch (e) {
       console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);

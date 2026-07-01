@@ -6,16 +6,19 @@
 //
 // Pattern (shared with gallery-loader / sampler-info):
 //   registerExtension -> enhance each node (on create AND on graph load) ->
-//   pin a distinct "⤢ Edit fields" button to the TOP of every node that has
-//   editable widgets (the universal entry point), AND wrap onPointerDown on
-//   multiline STRING widgets (Strategy A) so tapping the on-canvas sliver opens
-//   the editor focused on that field -> open a full-viewport HTML modal instead
+//   append a distinct "⤢ Edit fields" button (the universal entry point) to
+//   every node that has editable widgets, AND wrap onPointerDown on multiline
+//   STRING widgets (Strategy A) so tapping the on-canvas sliver opens the
+//   editor focused on that field -> open a full-viewport HTML modal instead
 //   of editing the keyboard-occluded on-canvas sliver. Additive + mobile-first:
 //   always chain to the original handler, write back only on explicit confirm,
 //   and fall back to the native control on dismiss / error.
+//   The button is appended LAST (never the top) and marked serialize:false on
+//   the widget itself — a non-serializable widget placed before real widgets
+//   corrupts widgets_values on save/restore (see enhanceNode for the details).
 //   Strategy A needs the modern Vue frontend's onPointerDown hook
-//   (comfyui-frontend-package >= 1.40); the top button is the version-skew
-//   safety net and the entry point on nodes with no text widget at all.
+//   (comfyui-frontend-package >= 1.40); the button is the version-skew safety
+//   net and the entry point on nodes with no text widget at all.
 //
 // Scope: the modal is an ALL-FIELDS node editor. Tapping any multiline text
 // widget (the detection target) opens a touch form with a control for EVERY

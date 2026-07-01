@@ -817,13 +817,8 @@ function enhanceNode(node) {
           console.warn(`[${EXT_NAME}] open from button failed`, e);
         }
       }, { serialize: false });
-      if (btn && node.widgets) {
-        const btnIdx = node.widgets.indexOf(btn);
-        if (btnIdx > 0) {
-          node.widgets.splice(btnIdx, 1);
-          node.widgets.unshift(btn);
-        }
-      }
+      if (btn)
+        btn.serialize = false;
       node.setDirtyCanvas?.(true, true);
     } catch (e) {
       console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);

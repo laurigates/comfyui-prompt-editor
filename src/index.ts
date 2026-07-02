@@ -32,7 +32,12 @@
 // (bundled INLINE into the build output). The fzf-lite fuzzy matcher also
 // lives in the kit, reserved for the v0.4 embedding palette. See ADR-0011.
 
-import { openModalShell } from "@laurigates/comfy-modal-kit";
+import {
+  openModalShell,
+  type PointerPatchableWidget,
+  patchWidgetPointer,
+  resolveFieldProvider,
+} from "@laurigates/comfy-modal-kit";
 import { app } from "/scripts/app.js";
 
 const EXT_NAME = "comfyui-prompt-editor";
@@ -565,6 +570,12 @@ interface FieldRow {
   changed: () => boolean;
   /** Focus this field's primary control (used for the tapped widget). */
   focus: () => void;
+  /**
+   * Tear down a provider-supplied control when the modal closes. Only set for
+   * fields backed by a cross-pack {@link FieldControl}; the built-in controls
+   * hold no listeners/timers that outlive the modal DOM, so they omit it.
+   */
+  _destroy?: () => void;
 }
 
 function makeBtn(label: string, title: string, cls?: string): HTMLButtonElement {
@@ -576,7 +587,37 @@ function makeBtn(label: string, title: string, cls?: string): HTMLButtonElement 
   return b;
 }
 
-export function buildField(widget: PromptWidget, kind: WidgetKind): FieldRow {
+export function buildField(
+  widget: PromptWidget,
+  kind: WidgetKind,
+  node: PromptNode | null = null,
+): FieldRow {
+  // Cross-pack provider first: if a sibling pack (e.g. touch-numeric's seed
+  // keypad, sampler-info's fuzzy list) registered a richer inline control for
+  // this widget, mount it in place of the built-in control. Additive-fallback:
+  // resolveFieldProvider returns null when nothing matches, and we fall through
+  // to the built-in <input>/<select>/toggle path below — never broken by the
+  // absence of a peer pack. (Kit ADR-0001; consumer ADR-0002.)
+  const provider = resolveFieldProvider(widget, node);
+  if (provider) {
+    try {
+      const ctl = provider.create({ widget, node, initialValue: widget.value });
+      return {
+        widget,
+        kind,
+        el: ctl.el,
+        read: () => ctl.getValue(),
+        changed: () => ctl.hasChanged(),
+        focus: () => ctl.focus?.(),
+        _destroy: () => ctl.destroy?.(),
+      };
+    } catch (e) {
+      // A misbehaving provider must never break the editor — fall through to
+      // the built-in control for this field.
+      console.warn(`[${EXT_NAME}] field provider for ${widget.name} failed; using built-in`, e);
+    }
+  }
+
   const el = document.createElement("div");
   el.className = "pe-field";
 
@@ -768,7 +809,7 @@ function openEditor(
   for (const w of node?.widgets ?? []) {
     const kind = classifyEditableWidget(w);
     if (!kind) continue;
-    const field = buildField(w, kind);
+    const field = buildField(w, kind, node);
     fields.push(field);
     wrap.appendChild(field.el);
   }
@@ -776,7 +817,7 @@ function openEditor(
   // Degenerate fallback: nothing classified (e.g. a lone text widget the
   // classifier somehow skipped) → still edit the tapped widget as multiline.
   if (fields.length === 0 && focusWidget) {
-    const field = buildField(focusWidget, "multiline");
+    const field = buildField(focusWidget, "multiline", node);
     fields.push(field);
     wrap.appendChild(field.el);
   }
@@ -814,7 +855,17 @@ function openEditor(
         commit();
       }
     },
-    onClose: () => {},
+    onClose: () => {
+      // Tear down any provider-supplied controls (listeners/timers) when the
+      // modal closes — whether via Save, Esc, or a coordinator dismiss.
+      for (const f of fields) {
+        try {
+          f._destroy?.();
+        } catch (e) {
+          console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
+        }
+      }
+    },
   });
 
   modal.bodyEl.appendChild(wrap);
@@ -861,25 +912,14 @@ function enhanceNode(node: PromptNode | null): void {
     if (!isTargetWidget(w)) continue;
     if (w._promptEditorPointerPatched) continue;
     w._promptEditorPointerPatched = true;
-    const origDown = w.onPointerDown;
-    w.onPointerDown = function (
-      this: PromptWidget,
-      pointer: unknown,
-      ownerNode: unknown,
-      canvas: unknown,
-    ): unknown {
-      try {
-        if (typeof origDown === "function") {
-          const consumed = origDown.call(this, pointer, ownerNode, canvas);
-          if (consumed) return consumed;
-        }
-        openEditor(w, (ownerNode as PromptNode) || node);
-        return true; // consume — suppress the native sliver edit
-      } catch (e) {
-        console.warn(`[${EXT_NAME}] editor open failed`, e);
-        return false; // fall back to native control on error
-      }
-    };
+    // The shared kit wrapper: chains the original onPointerDown, honors its
+    // consumed-return, runs our opener otherwise, and falls back to the native
+    // control on error. Replaces the pack's hand-rolled wrapper so provider
+    // clicks and the editor open coordinate through the kit (kit ADR-0001).
+    patchWidgetPointer(w as PointerPatchableWidget, (_pointer, ownerNode) => {
+      openEditor(w, (ownerNode as PromptNode) || node);
+      return true; // consume — suppress the native sliver edit
+    });
   }
 
   // A distinct node-level "Edit fields" button appended to every node with

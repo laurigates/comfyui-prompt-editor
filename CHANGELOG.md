@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.16](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.15...comfyui-prompt-editor-v0.1.16) (2026-07-02)
+
+
+### Features
+
+* consume comfy-modal-kit field providers for enhanced inline fields ([#47](https://github.com/laurigates/comfyui-prompt-editor/issues/47)) ([9ba7e3e](https://github.com/laurigates/comfyui-prompt-editor/commit/9ba7e3ed767dbed56491e8513954a4b2b1ea5663))
+
 ## [0.1.15](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.14...comfyui-prompt-editor-v0.1.15) (2026-07-01)
 
 

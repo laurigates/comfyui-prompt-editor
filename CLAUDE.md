@@ -91,3 +91,4 @@ maintains `CHANGELOG.md` and the version bump PR.
 | ADR | Status | Decision |
 |-----|--------|----------|
 | [0001](docs/blueprint/adrs/0001-adopt-typescript-bun-build.md) | Accepted | TypeScript source built to `web/dist/` via `bun build`; consume `@laurigates/comfy-modal-kit` inline. Supersedes the prior (CLAUDE.md-documented) vanilla-JS + vendored-primitives architecture. |
+| [0002](docs/blueprint/adrs/0002-consume-field-provider-registry.md) | Accepted | Consume the kit's cross-pack field-provider registry (`resolveFieldProvider` / `FieldControl`) and `patchWidgetPointer`, so the editor mounts a sibling pack's richer inline control per field, with additive fallback to the built-in control. Consumer mirror of kit ADR-0001. |

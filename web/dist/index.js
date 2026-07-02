@@ -1,7 +1,99 @@
 // node_modules/@laurigates/comfy-modal-kit/dist/index.js
-var STYLE_ID = "cmp-shell-style";
-var ACTIVE = null;
-var CSS = `
+var KEY = Symbol.for("laurigates.comfyModalKit");
+function getKit() {
+  const g = globalThis;
+  let kit = g[KEY];
+  if (!kit) {
+    kit = { fieldProviders: [], activeModal: null, pointerClaim: null };
+    g[KEY] = kit;
+  }
+  return kit;
+}
+function resolveFieldProvider(widget, node) {
+  let best = null;
+  let bestPriority = Number.NEGATIVE_INFINITY;
+  for (const p of getKit().fieldProviders) {
+    let matched = false;
+    try {
+      matched = p.match(widget, node);
+    } catch (e) {
+      console.warn(`[comfy-modal-kit] field provider "${p.id}" match() threw`, e);
+      matched = false;
+    }
+    if (!matched)
+      continue;
+    const priority = p.priority ?? 0;
+    if (priority > bestPriority) {
+      best = p;
+      bestPriority = priority;
+    }
+  }
+  return best;
+}
+var guardInstalled = false;
+function setActiveModal(handle) {
+  installPointerGuard();
+  dismissActiveModal();
+  getKit().activeModal = handle;
+}
+function dismissActiveModal() {
+  const kit = getKit();
+  const active = kit.activeModal;
+  if (!active)
+    return;
+  kit.activeModal = null;
+  try {
+    active.close();
+  } catch (e) {
+    console.warn("[comfy-modal-kit] active modal close() threw", e);
+  }
+}
+function getActiveModal() {
+  return getKit().activeModal;
+}
+function patchWidgetPointer(widget, opener) {
+  const original = widget.onPointerDown;
+  function patched(pointer, node, canvas) {
+    try {
+      if (typeof original === "function") {
+        const consumed = original.call(this, pointer, node, canvas);
+        if (consumed)
+          return consumed;
+      }
+      return opener(pointer, node, canvas);
+    } catch (e) {
+      console.warn("[comfy-modal-kit] patched onPointerDown threw", e);
+      return false;
+    }
+  }
+  widget.onPointerDown = patched;
+  return {
+    restore() {
+      widget.onPointerDown = original;
+    }
+  };
+}
+function installPointerGuard() {
+  if (guardInstalled)
+    return;
+  if (typeof window === "undefined")
+    return;
+  guardInstalled = true;
+  window.addEventListener("pointerdown", pointerGuard, true);
+}
+function pointerGuard(e) {
+  const active = getKit().activeModal;
+  if (!active)
+    return;
+  const target = e.target;
+  if (active.element && target && active.element.contains(target)) {
+    return;
+  }
+  e.stopImmediatePropagation();
+  dismissActiveModal();
+}
+var STYLE_ID2 = "cmp-shell-style";
+var CSS2 = `
 .cmp-backdrop {
     position: fixed;
     inset: 0;
@@ -150,37 +242,18 @@ var CSS = `
     color: #b8b8c0;
 }
 `;
-function ensureStyle() {
-  if (document.getElementById(STYLE_ID))
+function ensureStyle2() {
+  if (document.getElementById(STYLE_ID2))
     return;
   const s = document.createElement("style");
-  s.id = STYLE_ID;
-  s.textContent = CSS;
+  s.id = STYLE_ID2;
+  s.textContent = CSS2;
   document.head.appendChild(s);
 }
-function dismissActive() {
-  if (!ACTIVE)
-    return;
-  const a = ACTIVE;
-  ACTIVE = null;
-  try {
-    a.backdrop.remove();
-    a.dialog.remove();
-    document.removeEventListener("keydown", a._onKey, true);
-  } finally {
-    try {
-      a.opts.onClose?.();
-    } catch (e) {
-      console.warn("[modal-shell] onClose threw", e);
-    }
-  }
-}
 function openModalShell(opts = {}) {
-  ensureStyle();
-  dismissActive();
+  ensureStyle2();
   const backdrop = document.createElement("div");
   backdrop.className = "cmp-backdrop";
-  backdrop.addEventListener("pointerdown", dismissActive);
   const dialog = document.createElement("div");
   dialog.className = "cmp-dialog";
   if (opts.width)
@@ -207,7 +280,6 @@ function openModalShell(opts = {}) {
   closeBtn.type = "button";
   closeBtn.textContent = "×";
   closeBtn.title = "Close (Esc)";
-  closeBtn.addEventListener("click", dismissActive);
   headerEl.append(titleEl, closeBtn);
   const toolbarEl = document.createElement("div");
   toolbarEl.className = "cmp-toolbar";
@@ -240,11 +312,38 @@ function openModalShell(opts = {}) {
     footerEl.style.display = "none";
   }
   dialog.append(headerEl, toolbarEl, searchRow, bodyEl, footerEl);
+  let torn = false;
+  const teardown = () => {
+    if (torn)
+      return;
+    torn = true;
+    try {
+      backdrop.remove();
+      dialog.remove();
+      document.removeEventListener("keydown", onKey, true);
+    } finally {
+      try {
+        opts.onClose?.();
+      } catch (e) {
+        console.warn("[modal-shell] onClose threw", e);
+      }
+    }
+  };
+  const handle = { id: "modal-shell", element: dialog, close: teardown };
+  const requestClose = () => {
+    if (getActiveModal() === handle) {
+      dismissActiveModal();
+    } else {
+      teardown();
+    }
+  };
+  backdrop.addEventListener("pointerdown", requestClose);
+  closeBtn.addEventListener("click", requestClose);
   const onKey = (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      dismissActive();
+      requestClose();
       return;
     }
     try {
@@ -270,14 +369,14 @@ function openModalShell(opts = {}) {
     setStatus(s) {
       statusEl.textContent = s || "";
     },
-    close: dismissActive,
+    close: requestClose,
     _onKey: onKey,
     opts
   };
-  ACTIVE = controller;
+  setActiveModal(handle);
   if (opts.showSearch !== false) {
     requestAnimationFrame(() => {
-      if (ACTIVE === controller)
+      if (getActiveModal() === handle)
         searchEl.focus();
     });
   }
@@ -287,7 +386,7 @@ function openModalShell(opts = {}) {
 // src/index.ts
 import { app } from "/scripts/app.js";
 var EXT_NAME = "comfyui-prompt-editor";
-var STYLE_ID2 = "pe-style";
+var STYLE_ID = "pe-style";
 var TARGET_WIDGET_NAMES = new Set([
   "text",
   "prompt",
@@ -435,7 +534,7 @@ function resolveNumberFormat(options) {
     step: step !== undefined && step > 0 ? step : undefined
   };
 }
-var CSS2 = `
+var CSS = `
 .pe-wrap {
     display: flex;
     flex-direction: column;
@@ -550,12 +649,12 @@ var CSS2 = `
     font-size: 12px;
 }
 `;
-function ensureStyle2() {
-  if (document.getElementById(STYLE_ID2))
+function ensureStyle() {
+  if (document.getElementById(STYLE_ID))
     return;
   const s = document.createElement("style");
-  s.id = STYLE_ID2;
-  s.textContent = CSS2;
+  s.id = STYLE_ID;
+  s.textContent = CSS;
   document.head.appendChild(s);
 }
 function applyWidgetValue(widget, node, value) {
@@ -580,7 +679,24 @@ function makeBtn(label, title, cls) {
     b.title = title;
   return b;
 }
-function buildField(widget, kind) {
+function buildField(widget, kind, node = null) {
+  const provider = resolveFieldProvider(widget, node);
+  if (provider) {
+    try {
+      const ctl = provider.create({ widget, node, initialValue: widget.value });
+      return {
+        widget,
+        kind,
+        el: ctl.el,
+        read: () => ctl.getValue(),
+        changed: () => ctl.hasChanged(),
+        focus: () => ctl.focus?.(),
+        _destroy: () => ctl.destroy?.()
+      };
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] field provider for ${widget.name} failed; using built-in`, e);
+    }
+  }
   const el = document.createElement("div");
   el.className = "pe-field";
   const label = document.createElement("label");
@@ -738,7 +854,7 @@ function buildField(widget, kind) {
   };
 }
 function openEditor(focusWidget, node) {
-  ensureStyle2();
+  ensureStyle();
   const wrap = document.createElement("div");
   wrap.className = "pe-wrap";
   const fields = [];
@@ -746,12 +862,12 @@ function openEditor(focusWidget, node) {
     const kind = classifyEditableWidget(w);
     if (!kind)
       continue;
-    const field = buildField(w, kind);
+    const field = buildField(w, kind, node);
     fields.push(field);
     wrap.appendChild(field.el);
   }
   if (fields.length === 0 && focusWidget) {
-    const field = buildField(focusWidget, "multiline");
+    const field = buildField(focusWidget, "multiline", node);
     fields.push(field);
     wrap.appendChild(field.el);
   }
@@ -785,7 +901,15 @@ function openEditor(focusWidget, node) {
         commit();
       }
     },
-    onClose: () => {}
+    onClose: () => {
+      for (const f of fields) {
+        try {
+          f._destroy?.();
+        } catch (e) {
+          console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
+        }
+      }
+    }
   });
   modal.bodyEl.appendChild(wrap);
   const saveBtn = makeBtn("Save", "Save (Cmd/Ctrl+Enter)", "pe-btn-primary");
@@ -816,21 +940,10 @@ function enhanceNode(node) {
     if (w._promptEditorPointerPatched)
       continue;
     w._promptEditorPointerPatched = true;
-    const origDown = w.onPointerDown;
-    w.onPointerDown = function(pointer, ownerNode, canvas) {
-      try {
-        if (typeof origDown === "function") {
-          const consumed = origDown.call(this, pointer, ownerNode, canvas);
-          if (consumed)
-            return consumed;
-        }
-        openEditor(w, ownerNode || node);
-        return true;
-      } catch (e) {
-        console.warn(`[${EXT_NAME}] editor open failed`, e);
-        return false;
-      }
-    };
+    patchWidgetPointer(w, (_pointer, ownerNode) => {
+      openEditor(w, ownerNode || node);
+      return true;
+    });
   }
   if (!node._promptEditorNodeButtonAdded) {
     node._promptEditorNodeButtonAdded = true;

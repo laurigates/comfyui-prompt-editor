@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.18](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.17...comfyui-prompt-editor-v0.1.18) (2026-07-04)
+
+
+### Bug Fixes
+
+* **modal:** make the shell body the single scroll region on mobile ([#53](https://github.com/laurigates/comfyui-prompt-editor/issues/53)) ([d39feca](https://github.com/laurigates/comfyui-prompt-editor/commit/d39feca5484ab670cb07bf30c27d232ffe2599b8))
+
 ## [0.1.17](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.16...comfyui-prompt-editor-v0.1.17) (2026-07-04)
 
 

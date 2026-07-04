@@ -749,14 +749,16 @@ function resolveNumberFormat(options) {
 }
 var CSS3 = `
 .pe-wrap {
+    /* Plain layout column — NOT a scroll container. The modal shell's
+       .cmp-body (flex:1; overflow-y:auto) is the single scroll region.
+       A second nested scroll container here broke touch scrolling on mobile
+       Safari: the dialog height comes from max-height (the shell applies the
+       height option as maxHeight), so this element height:100% never resolved
+       to a definite height — it captured the touch-scroll gesture but had
+       nothing to scroll, swallowing it before .cmp-body could scroll. */
     display: flex;
     flex-direction: column;
     gap: 14px;
-    height: 100%;
-    min-height: 0;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
     padding: 2px;
 }
 .pe-field {

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.16...comfyui-prompt-editor-v0.1.17) (2026-07-04)
+
+
+### Bug Fixes
+
+* **instrumentation:** surface failed field saves via notify(); real README ([#50](https://github.com/laurigates/comfyui-prompt-editor/issues/50)) ([f6dbd1d](https://github.com/laurigates/comfyui-prompt-editor/commit/f6dbd1d81fa862cfdda1b738c9cae97b3b67eb5e))
+
 ## [0.1.16](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.15...comfyui-prompt-editor-v0.1.16) (2026-07-02)
 
 

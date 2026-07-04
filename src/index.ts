@@ -33,6 +33,7 @@
 // lives in the kit, reserved for the v0.4 embedding palette. See ADR-0011.
 
 import {
+  notify,
   openModalShell,
   type PointerPatchableWidget,
   patchWidgetPointer,
@@ -826,12 +827,24 @@ function openEditor(
   const commit = (): void => {
     if (committed) return;
     committed = true;
+    // Collect fields whose write-back throws so a partially-failed save is
+    // surfaced via a copyable popup — on a touch/mobile frontend there is no
+    // devtools trail to inspect the console.warn below.
+    const failedNames: string[] = [];
     for (const f of fields) {
       try {
         if (f.changed()) applyWidgetValue(f.widget, node, f.read());
       } catch (e) {
         console.warn(`[${EXT_NAME}] write-back failed for ${f.widget.name}`, e);
+        failedNames.push(f.widget.name ?? "(unnamed)");
       }
+    }
+    if (failedNames.length > 0) {
+      notify({
+        severity: "error",
+        summary: "Some fields did not save",
+        detail: failedNames.join(", "),
+      });
     }
     modal.close();
   };

@@ -15,8 +15,9 @@ native control, never breaks serialized workflows), and the modal is
 **touch-first** (16px inputs to avoid iOS zoom, big tap targets, momentum
 scroll). Consumes the shared `@laurigates/comfy-modal-kit`
 (`openModalShell` / `closeModalShell` / `fuzzyScore` / `fuzzyRank` /
-`highlightMatches`), **bundled inline** at build time — the modal-shell +
-fuzzy primitives are no longer vendored.
+`highlightMatches` / `ensureStyleOnce` / `appendButtonWidget`), **bundled
+inline** at build time — the modal-shell + fuzzy primitives are no longer
+vendored.
 
 ## File layout
 

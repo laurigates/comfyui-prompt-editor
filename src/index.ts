@@ -33,6 +33,9 @@
 // lives in the kit, reserved for the v0.4 embedding palette. See ADR-0011.
 
 import {
+  appendButtonWidget,
+  type ButtonWidgetHost,
+  ensureStyleOnce,
   notify,
   openModalShell,
   type PointerPatchableWidget,
@@ -523,14 +526,6 @@ const CSS = `
 }
 `;
 
-function ensureStyle(): void {
-  if (document.getElementById(STYLE_ID)) return;
-  const s = document.createElement("style");
-  s.id = STYLE_ID;
-  s.textContent = CSS;
-  document.head.appendChild(s);
-}
-
 // ============================================================
 // Write-back — additive, only on explicit confirm
 // ============================================================
@@ -802,7 +797,7 @@ function openEditor(
   focusWidget: PromptWidget | null,
   node: PromptNode | null,
 ): ReturnType<typeof openModalShell> {
-  ensureStyle();
+  ensureStyleOnce(STYLE_ID, CSS);
 
   const wrap = document.createElement("div");
   wrap.className = "pe-wrap";
@@ -941,44 +936,13 @@ function enhanceNode(node: PromptNode | null): void {
   // editable widgets. This is the universal entry point (works on nodes with no
   // text widget at all) and doubles as the version-skew safety net for Strategy
   // A. Opens with no specific focus (the first field). Added at most once per
-  // node.
-  //
-  // WORKFLOW-CORRUPTION HAZARD — why this button must be LAST and serialize:false
-  // set on the widget itself:
-  //   The frontend serializes/restores `widgets_values` keyed on
-  //   `widget.serialize` (the flag ON the widget), NOT `widget.options.serialize`
-  //   (all the addWidget option sets). It must be set directly, or the button is
-  //   treated as serializable.
-  //   Even with serialize:false, the SAVE loop assigns `widgets_values[rawIndex]`
-  //   while the RESTORE loop is compacting — so a skipped (serialize:false) widget
-  //   placed BEFORE real widgets leaves a hole (a leading `null`) on save that
-  //   shifts every value by one on the next open. Appending the button to the END
-  //   (addWidget's default — do NOT unshift it to the top) keeps the skipped slot
-  //   past all real values, so the array stays dense and workflows round-trip
-  //   intact. Verified live against comfyui-frontend api-CdYn1OQH.js.
+  // node. The serialize:false / keep-last workflow-corruption hazard handling
+  // lives in the kit's appendButtonWidget.
   if (!node._promptEditorNodeButtonAdded) {
     node._promptEditorNodeButtonAdded = true;
-    try {
-      const btn = node.addWidget?.(
-        "button",
-        "⤢ Edit fields",
-        null,
-        () => {
-          try {
-            openEditor(null, node);
-          } catch (e) {
-            console.warn(`[${EXT_NAME}] open from button failed`, e);
-          }
-        },
-        { serialize: false },
-      );
-      // The flag the frontend's widgets_values loops actually check. addWidget
-      // only set widget.options.serialize above; this sets it on the widget.
-      if (btn) btn.serialize = false;
-      node.setDirtyCanvas?.(true, true);
-    } catch (e) {
-      console.warn(`[${EXT_NAME}] addWidget(button) failed`, e);
-    }
+    appendButtonWidget(node as ButtonWidgetHost, "⤢ Edit fields", () => openEditor(null, node), {
+      logPrefix: EXT_NAME,
+    });
   }
 }
 

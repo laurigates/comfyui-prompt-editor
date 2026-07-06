@@ -1,4 +1,35 @@
 // node_modules/@laurigates/comfy-modal-kit/dist/index.js
+var KEY = Symbol.for("laurigates.comfyModalKit");
+function getKit() {
+  const g = globalThis;
+  let kit = g[KEY];
+  if (!kit) {
+    kit = { fieldProviders: [], activeModal: null, pointerClaim: null };
+    g[KEY] = kit;
+  }
+  return kit;
+}
+function resolveFieldProvider(widget, node) {
+  let best = null;
+  let bestPriority = Number.NEGATIVE_INFINITY;
+  for (const p of getKit().fieldProviders) {
+    let matched = false;
+    try {
+      matched = p.match(widget, node);
+    } catch (e) {
+      console.warn(`[comfy-modal-kit] field provider "${p.id}" match() threw`, e);
+      matched = false;
+    }
+    if (!matched)
+      continue;
+    const priority = p.priority ?? 0;
+    if (priority > bestPriority) {
+      best = p;
+      bestPriority = priority;
+    }
+  }
+  return best;
+}
 function ensureStyleOnce(id, css) {
   if (typeof document === "undefined")
     return;
@@ -211,37 +242,6 @@ function notify(opts) {
     timer = setTimeout(close, life);
   }
   return { close, el: toast };
-}
-var KEY = Symbol.for("laurigates.comfyModalKit");
-function getKit() {
-  const g = globalThis;
-  let kit = g[KEY];
-  if (!kit) {
-    kit = { fieldProviders: [], activeModal: null, pointerClaim: null };
-    g[KEY] = kit;
-  }
-  return kit;
-}
-function resolveFieldProvider(widget, node) {
-  let best = null;
-  let bestPriority = Number.NEGATIVE_INFINITY;
-  for (const p of getKit().fieldProviders) {
-    let matched = false;
-    try {
-      matched = p.match(widget, node);
-    } catch (e) {
-      console.warn(`[comfy-modal-kit] field provider "${p.id}" match() threw`, e);
-      matched = false;
-    }
-    if (!matched)
-      continue;
-    const priority = p.priority ?? 0;
-    if (priority > bestPriority) {
-      best = p;
-      bestPriority = priority;
-    }
-  }
-  return best;
 }
 var guardInstalled = false;
 function setActiveModal(handle) {

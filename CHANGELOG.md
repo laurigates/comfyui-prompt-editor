@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.18...comfyui-prompt-editor-v0.1.19) (2026-07-06)
+
+
+### Bug Fixes
+
+* refresh lockfile and rebuild dist against published comfy-modal-kit 0.6.0 ([#57](https://github.com/laurigates/comfyui-prompt-editor/issues/57)) ([8674552](https://github.com/laurigates/comfyui-prompt-editor/commit/8674552aa4f28624bc8cea943abcd34a967943dc))
+
 ## [0.1.18](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.17...comfyui-prompt-editor-v0.1.18) (2026-07-04)
 
 

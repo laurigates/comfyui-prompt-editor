@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.20](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.19...comfyui-prompt-editor-v0.1.20) (2026-07-13)
+
+
+### Features
+
+* **fields:** add a per-modal sibling-field bus for cross-field context ([#60](https://github.com/laurigates/comfyui-prompt-editor/issues/60)) ([fbcb548](https://github.com/laurigates/comfyui-prompt-editor/commit/fbcb548784095287ec8d203ca32deb79564efde9))
+
 ## [0.1.19](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.18...comfyui-prompt-editor-v0.1.19) (2026-07-06)
 
 

@@ -576,6 +576,94 @@ interface FieldRow {
   _destroy?: () => void;
 }
 
+// ============================================================
+// Sibling-field bus — live cross-field context within one modal session
+// ============================================================
+//
+// This editor edits MANY widgets at once and only writes values back to the
+// node on commit(). So node.widgets[] holds the COMMITTED value — the one from
+// before the modal opened — not the uncommitted value the user just picked in
+// another field. A sibling-aware control (e.g. sampler-info's scheduler picker
+// highlighting the schedulers that pair with the currently-selected SAMPLER)
+// must read the LIVE in-modal value, which is exactly what this bus provides.
+//
+// It is the host half of the kit's field-provider contract (comfy-modal-kit
+// >= 0.7.0): the kit ships FieldControlContext.getSiblingValue /
+// .onSiblingChange and FieldControl.onValueChange, but no runtime — the host
+// owns the state, because the host owns the field rows.
+//
+// The bus closes over the live `fields` array BY REFERENCE and looks a sibling
+// up lazily at call time. Fields are built in a loop, so a control may ask for
+// a sibling whose row does not exist yet; a snapshot taken at create() time
+// would miss it forever.
+
+export interface FieldBus {
+  /**
+   * The live in-modal value of the widget named `widgetName`, or the node's
+   * committed value when no field row is live for that name.
+   */
+  getSiblingValue: (widgetName: string) => unknown;
+  /**
+   * Subscribe `cb` on behalf of `owner`. The owner is never notified of its own
+   * change — re-notifying the originator is an easy feedback/infinite-loop
+   * footgun. Returns an unsubscribe.
+   */
+  subscribe: (
+    owner: PromptWidget | null,
+    cb: (widgetName: string, value: unknown) => void,
+  ) => () => void;
+  /** Fan `origin`'s new value out to every subscriber except `origin` itself. */
+  notify: (origin: PromptWidget, value: unknown) => void;
+  /** Drop every subscriber (called when the modal closes). */
+  destroy: () => void;
+}
+
+export function createFieldBus(fields: FieldRow[], node: PromptNode | null): FieldBus {
+  const subs: { owner: PromptWidget | null; cb: (name: string, value: unknown) => void }[] = [];
+
+  const committedValue = (widgetName: string): unknown =>
+    node?.widgets?.find((w) => w.name === widgetName)?.value;
+
+  return {
+    getSiblingValue: (widgetName) => {
+      const row = fields.find((f) => f.widget.name === widgetName);
+      if (!row) return committedValue(widgetName);
+      try {
+        return row.read();
+      } catch (e) {
+        // One throwing control must never break a sibling — fall back to the
+        // committed value rather than propagating.
+        console.warn(`[${EXT_NAME}] read() threw for ${widgetName}; using committed value`, e);
+        return committedValue(widgetName);
+      }
+    },
+    subscribe: (owner, cb) => {
+      const entry = { owner, cb };
+      subs.push(entry);
+      return () => {
+        const i = subs.indexOf(entry);
+        if (i >= 0) subs.splice(i, 1);
+      };
+    },
+    notify: (origin, value) => {
+      const name = origin.name;
+      if (typeof name !== "string" || name === "") return;
+      // Copy first: a subscriber may unsubscribe itself while we iterate.
+      for (const s of [...subs]) {
+        if (s.owner === origin) continue;
+        try {
+          s.cb(name, value);
+        } catch (e) {
+          console.warn(`[${EXT_NAME}] sibling subscriber threw for ${name}`, e);
+        }
+      }
+    },
+    destroy: () => {
+      subs.length = 0;
+    },
+  };
+}
+
 function makeBtn(label: string, title: string, cls?: string): HTMLButtonElement {
   const b = document.createElement("button");
   b.type = "button";
@@ -589,7 +677,19 @@ export function buildField(
   widget: PromptWidget,
   kind: WidgetKind,
   node: PromptNode | null = null,
+  bus?: FieldBus,
 ): FieldRow {
+  // Every control announces its change through the bus so sibling-aware
+  // controls see the LIVE value. Fail-soft: no bus (an existing call site, a
+  // test) → a no-op.
+  const announce = (value: unknown): void => {
+    try {
+      bus?.notify(widget, value);
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] sibling notify failed for ${widget.name}`, e);
+    }
+  };
+
   // Cross-pack provider first: if a sibling pack (e.g. touch-numeric's seed
   // keypad, sampler-info's fuzzy list) registered a richer inline control for
   // this widget, mount it in place of the built-in control. Additive-fallback:
@@ -599,7 +699,28 @@ export function buildField(
   const provider = resolveFieldProvider(widget, node);
   if (provider) {
     try {
-      const ctl = provider.create({ widget, node, initialValue: widget.value });
+      // Hand the provider the sibling-context members only when a bus exists.
+      // They are optional in the kit's contract, so a single-widget host (or a
+      // test) that omits them is a supported shape, not a degraded one.
+      const ctl = provider.create({
+        widget,
+        node,
+        initialValue: widget.value,
+        ...(bus
+          ? {
+              getSiblingValue: (name: string) => bus.getSiblingValue(name),
+              onSiblingChange: (cb: (widgetName: string, value: unknown) => void) =>
+                bus.subscribe(widget, cb),
+            }
+          : {}),
+      });
+      // The other end of the contract: fan this control's changes out to its
+      // siblings. A provider that has nothing to tell anyone omits onValueChange.
+      try {
+        ctl.onValueChange?.((value) => announce(value));
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] onValueChange wiring failed for ${widget.name}`, e);
+      }
       return {
         widget,
         kind,
@@ -637,7 +758,10 @@ export function buildField(
       labelText.textContent = input.checked ? "enabled" : "disabled";
     };
     sync();
-    input.addEventListener("change", sync);
+    input.addEventListener("change", () => {
+      sync();
+      announce(input.checked);
+    });
     row.append(input, labelText);
     el.appendChild(row);
     return {
@@ -671,6 +795,10 @@ export function buildField(
       const hit = values.find((v) => String(v) === select.value);
       return hit === undefined ? select.value : hit;
     };
+    // The built-in combo is the common host for the OTHER half of a pair (e.g.
+    // sampler-info provides the scheduler control while `sampler_name` stays a
+    // plain <select>), so it must feed the bus or the feature is half-dead.
+    select.addEventListener("change", () => announce(read()));
     return {
       widget,
       kind,
@@ -712,6 +840,7 @@ export function buildField(
       if (max !== undefined) v = Math.min(max, v);
       return isInt ? Math.round(v) : v;
     };
+    input.addEventListener("input", () => announce(read()));
     return {
       widget,
       kind,
@@ -733,6 +862,7 @@ export function buildField(
     input.autocomplete = "off";
     input.setAttribute("autocorrect", "off");
     el.appendChild(input);
+    input.addEventListener("input", () => announce(input.value));
     return {
       widget,
       kind,
@@ -771,8 +901,15 @@ export function buildField(
       console.warn(`[${EXT_NAME}] weight step failed`, e);
     }
   };
-  downBtn.addEventListener("click", () => stepWeight(-0.1));
-  upBtn.addEventListener("click", () => stepWeight(0.1));
+  downBtn.addEventListener("click", () => {
+    stepWeight(-0.1);
+    announce(textarea.value);
+  });
+  upBtn.addEventListener("click", () => {
+    stepWeight(0.1);
+    announce(textarea.value);
+  });
+  textarea.addEventListener("input", () => announce(textarea.value));
 
   el.append(bar, textarea);
   return {
@@ -802,12 +939,15 @@ function openEditor(
   const wrap = document.createElement("div");
   wrap.className = "pe-wrap";
 
-  // Build a field for every editable widget on the node, in node order.
+  // Build a field for every editable widget on the node, in node order. The bus
+  // is created first and closes over `fields` by reference, so a control built
+  // early can still resolve a sibling whose row is built later in this loop.
   const fields: FieldRow[] = [];
+  const bus = createFieldBus(fields, node);
   for (const w of node?.widgets ?? []) {
     const kind = classifyEditableWidget(w);
     if (!kind) continue;
-    const field = buildField(w, kind, node);
+    const field = buildField(w, kind, node, bus);
     fields.push(field);
     wrap.appendChild(field.el);
   }
@@ -815,7 +955,7 @@ function openEditor(
   // Degenerate fallback: nothing classified (e.g. a lone text widget the
   // classifier somehow skipped) → still edit the tapped widget as multiline.
   if (fields.length === 0 && focusWidget) {
-    const field = buildField(focusWidget, "multiline", node);
+    const field = buildField(focusWidget, "multiline", node, bus);
     fields.push(field);
     wrap.appendChild(field.el);
   }
@@ -875,6 +1015,9 @@ function openEditor(
           console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
         }
       }
+      // The bus lives for exactly one modal session; drop any subscriber a
+      // control forgot to unsubscribe.
+      bus.destroy();
     },
   });
 

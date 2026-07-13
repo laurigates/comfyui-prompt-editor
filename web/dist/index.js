@@ -893,6 +893,49 @@ function applyWidgetValue(widget, node, value) {
   node?.setDirtyCanvas?.(true, true);
   app.graph?.setDirtyCanvas?.(true, true);
 }
+function createFieldBus(fields, node) {
+  const subs = [];
+  const committedValue = (widgetName) => node?.widgets?.find((w) => w.name === widgetName)?.value;
+  return {
+    getSiblingValue: (widgetName) => {
+      const row = fields.find((f) => f.widget.name === widgetName);
+      if (!row)
+        return committedValue(widgetName);
+      try {
+        return row.read();
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] read() threw for ${widgetName}; using committed value`, e);
+        return committedValue(widgetName);
+      }
+    },
+    subscribe: (owner, cb) => {
+      const entry = { owner, cb };
+      subs.push(entry);
+      return () => {
+        const i = subs.indexOf(entry);
+        if (i >= 0)
+          subs.splice(i, 1);
+      };
+    },
+    notify: (origin, value) => {
+      const name = origin.name;
+      if (typeof name !== "string" || name === "")
+        return;
+      for (const s of [...subs]) {
+        if (s.owner === origin)
+          continue;
+        try {
+          s.cb(name, value);
+        } catch (e) {
+          console.warn(`[${EXT_NAME}] sibling subscriber threw for ${name}`, e);
+        }
+      }
+    },
+    destroy: () => {
+      subs.length = 0;
+    }
+  };
+}
 function makeBtn(label, title, cls) {
   const b = document.createElement("button");
   b.type = "button";
@@ -902,11 +945,31 @@ function makeBtn(label, title, cls) {
     b.title = title;
   return b;
 }
-function buildField(widget, kind, node = null) {
+function buildField(widget, kind, node = null, bus) {
+  const announce = (value) => {
+    try {
+      bus?.notify(widget, value);
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] sibling notify failed for ${widget.name}`, e);
+    }
+  };
   const provider = resolveFieldProvider(widget, node);
   if (provider) {
     try {
-      const ctl = provider.create({ widget, node, initialValue: widget.value });
+      const ctl = provider.create({
+        widget,
+        node,
+        initialValue: widget.value,
+        ...bus ? {
+          getSiblingValue: (name) => bus.getSiblingValue(name),
+          onSiblingChange: (cb) => bus.subscribe(widget, cb)
+        } : {}
+      });
+      try {
+        ctl.onValueChange?.((value) => announce(value));
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] onValueChange wiring failed for ${widget.name}`, e);
+      }
       return {
         widget,
         kind,
@@ -939,7 +1002,10 @@ function buildField(widget, kind, node = null) {
       labelText.textContent = input.checked ? "enabled" : "disabled";
     };
     sync();
-    input.addEventListener("change", sync);
+    input.addEventListener("change", () => {
+      sync();
+      announce(input.checked);
+    });
     row.append(input, labelText);
     el.appendChild(row);
     return {
@@ -969,6 +1035,7 @@ function buildField(widget, kind, node = null) {
       const hit = values.find((v) => String(v) === select.value);
       return hit === undefined ? select.value : hit;
     };
+    select.addEventListener("change", () => announce(read()));
     return {
       widget,
       kind,
@@ -1006,6 +1073,7 @@ function buildField(widget, kind, node = null) {
         v = Math.min(max, v);
       return isInt ? Math.round(v) : v;
     };
+    input.addEventListener("input", () => announce(read()));
     return {
       widget,
       kind,
@@ -1026,6 +1094,7 @@ function buildField(widget, kind, node = null) {
     input.autocomplete = "off";
     input.setAttribute("autocorrect", "off");
     el.appendChild(input);
+    input.addEventListener("input", () => announce(input.value));
     return {
       widget,
       kind,
@@ -1060,8 +1129,15 @@ function buildField(widget, kind, node = null) {
       console.warn(`[${EXT_NAME}] weight step failed`, e);
     }
   };
-  downBtn.addEventListener("click", () => stepWeight(-0.1));
-  upBtn.addEventListener("click", () => stepWeight(0.1));
+  downBtn.addEventListener("click", () => {
+    stepWeight(-0.1);
+    announce(textarea.value);
+  });
+  upBtn.addEventListener("click", () => {
+    stepWeight(0.1);
+    announce(textarea.value);
+  });
+  textarea.addEventListener("input", () => announce(textarea.value));
   el.append(bar, textarea);
   return {
     widget,
@@ -1081,16 +1157,17 @@ function openEditor(focusWidget, node) {
   const wrap = document.createElement("div");
   wrap.className = "pe-wrap";
   const fields = [];
+  const bus = createFieldBus(fields, node);
   for (const w of node?.widgets ?? []) {
     const kind = classifyEditableWidget(w);
     if (!kind)
       continue;
-    const field = buildField(w, kind, node);
+    const field = buildField(w, kind, node, bus);
     fields.push(field);
     wrap.appendChild(field.el);
   }
   if (fields.length === 0 && focusWidget) {
-    const field = buildField(focusWidget, "multiline", node);
+    const field = buildField(focusWidget, "multiline", node, bus);
     fields.push(field);
     wrap.appendChild(field.el);
   }
@@ -1141,6 +1218,7 @@ function openEditor(focusWidget, node) {
           console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
         }
       }
+      bus.destroy();
     }
   });
   modal.bodyEl.appendChild(wrap);
@@ -1207,6 +1285,7 @@ export {
   resolveNumberFormat,
   isTargetWidget,
   isMultilineStringWidget,
+  createFieldBus,
   classifyEditableWidget,
   bumpWeight,
   buildField,

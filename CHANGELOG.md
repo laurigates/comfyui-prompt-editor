@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.21](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.20...comfyui-prompt-editor-v0.1.21) (2026-07-17)
+
+
+### Bug Fixes
+
+* **registry:** shrink registry tarball scan surface + hygiene guard ([#63](https://github.com/laurigates/comfyui-prompt-editor/issues/63)) ([63038bf](https://github.com/laurigates/comfyui-prompt-editor/commit/63038bf132c25350e4ebe7723e1fc7678843f6ad))
+
 ## [0.1.20](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.19...comfyui-prompt-editor-v0.1.20) (2026-07-13)
 
 

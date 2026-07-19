@@ -716,6 +716,12 @@ function bumpWeight(text, selStart, selEnd, delta) {
   const out = src.slice(0, a) + replacement + src.slice(b);
   return { text: out, selStart: a, selEnd: a + replacement.length };
 }
+function isLoraWidgetValue(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v))
+    return false;
+  const o = v;
+  return "on" in o && "lora" in o && typeof o.strength === "number";
+}
 function classifyEditableWidget(w) {
   if (!w || typeof w !== "object")
     return null;
@@ -726,6 +732,10 @@ function classifyEditableWidget(w) {
   if (widget.hidden === true)
     return null;
   if (typeof widget.name !== "string" || widget.name === "")
+    return null;
+  if (isLoraWidgetValue(widget.value))
+    return "lora";
+  if (typeStr === "custom")
     return null;
   if (Array.isArray(widget.options?.values))
     return "combo";
@@ -881,6 +891,46 @@ var CSS3 = `
     color: #888;
     font-size: 12px;
 }
+.pe-lora {
+    /* Each lora reads as a card so a stack of them is scannable on mobile. */
+    border: 1px solid #2a2a36;
+    border-radius: 8px;
+    padding: 12px;
+    background: #17171f;
+}
+.pe-lora-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.pe-lora-on {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    touch-action: manipulation;
+}
+.pe-lora-name {
+    /* Shrink to share the row with the toggle; min-width:0 lets it truncate. */
+    flex: 1;
+    width: auto;
+    min-width: 0;
+}
+.pe-lora-strengths {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.pe-lora-strength-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.pe-lora-strength {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    text-align: center;
+}
 `;
 function applyWidgetValue(widget, node, value) {
   widget.value = value;
@@ -991,6 +1041,110 @@ function buildField(widget, kind, node = null, bus) {
   label.className = "pe-label";
   label.textContent = widget.name ?? "";
   el.appendChild(label);
+  if (kind === "lora") {
+    el.classList.add("pe-lora");
+    const initial2 = isLoraWidgetValue(widget.value) ? widget.value : {};
+    const num = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
+    const initialOn = initial2.on !== false;
+    const initialLora = typeof initial2.lora === "string" ? initial2.lora : "";
+    const initialStrength = num(initial2.strength, 1);
+    const hasTwo = initial2.strengthTwo != null;
+    const initialStrengthTwo = num(initial2.strengthTwo, initialStrength);
+    const base = initialLora.split(/[\\/]/).pop() ?? "";
+    label.textContent = base || widget.name || "lora";
+    const fmtStrength = (n) => String(Math.round((Number.isFinite(n) ? n : 0) * 100) / 100);
+    const head = document.createElement("div");
+    head.className = "pe-lora-head";
+    const onInput = document.createElement("input");
+    onInput.type = "checkbox";
+    onInput.className = "pe-lora-on";
+    onInput.checked = initialOn;
+    onInput.title = "Toggle this LoRA on/off";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "pe-input pe-lora-name";
+    nameInput.value = initialLora;
+    nameInput.spellcheck = false;
+    nameInput.autocapitalize = "off";
+    nameInput.autocomplete = "off";
+    nameInput.setAttribute("autocorrect", "off");
+    head.append(onInput, nameInput);
+    let strengthInput;
+    let strengthTwoInput;
+    const readNum = (input, fallback) => {
+      if (!input)
+        return fallback;
+      const n = Number.parseFloat(input.value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const readValue = () => ({
+      on: onInput.checked,
+      lora: nameInput.value,
+      strength: readNum(strengthInput, initialStrength),
+      strengthTwo: hasTwo ? readNum(strengthTwoInput, initialStrengthTwo) : initial2.strengthTwo ?? null
+    });
+    const onAnyChange = () => announce(readValue());
+    const makeStrengthRow = (text, initNum) => {
+      const row = document.createElement("div");
+      row.className = "pe-lora-strength-row";
+      const lab = document.createElement("label");
+      lab.className = "pe-hint";
+      lab.textContent = text;
+      const bar2 = document.createElement("div");
+      bar2.className = "pe-bar";
+      const minus = makeBtn("−", `Decrease ${text}`);
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "pe-input pe-lora-strength";
+      input.step = "0.05";
+      input.inputMode = "decimal";
+      input.value = fmtStrength(initNum);
+      const plus = makeBtn("+", `Increase ${text}`);
+      const step = (delta) => {
+        const cur = Number.parseFloat(input.value);
+        input.value = fmtStrength((Number.isFinite(cur) ? cur : initNum) + delta);
+        onAnyChange();
+      };
+      minus.addEventListener("click", () => step(-0.05));
+      plus.addEventListener("click", () => step(0.05));
+      input.addEventListener("input", onAnyChange);
+      bar2.append(minus, input, plus);
+      row.append(lab, bar2);
+      return { row, input };
+    };
+    onInput.addEventListener("change", onAnyChange);
+    nameInput.addEventListener("input", onAnyChange);
+    const strengths = document.createElement("div");
+    strengths.className = "pe-lora-strengths";
+    const sRow = makeStrengthRow(hasTwo ? "model strength" : "strength", initialStrength);
+    strengthInput = sRow.input;
+    strengths.appendChild(sRow.row);
+    if (hasTwo) {
+      const s2Row = makeStrengthRow("clip strength", initialStrengthTwo);
+      strengthTwoInput = s2Row.input;
+      strengths.appendChild(s2Row.row);
+    }
+    el.append(head, strengths);
+    return {
+      widget,
+      kind,
+      el,
+      read: readValue,
+      changed: () => {
+        const v = readValue();
+        if (v.on !== initialOn)
+          return true;
+        if (v.lora !== initialLora)
+          return true;
+        if (v.strength !== initialStrength)
+          return true;
+        if (hasTwo && v.strengthTwo !== initialStrengthTwo)
+          return true;
+        return false;
+      },
+      focus: () => (strengthInput ?? nameInput).focus()
+    };
+  }
   if (kind === "boolean") {
     const initial2 = widget.value === true;
     const row = document.createElement("div");
@@ -1287,6 +1441,7 @@ export {
   resolveNumberFormat,
   isTargetWidget,
   isMultilineStringWidget,
+  isLoraWidgetValue,
   createFieldBus,
   classifyEditableWidget,
   bumpWeight,

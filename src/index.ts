@@ -23,10 +23,12 @@
 // Scope: the modal is an ALL-FIELDS node editor. Tapping any multiline text
 // widget (the detection target) opens a touch form with a control for EVERY
 // editable widget on the node — multiline + single-line STRING, INT/FLOAT,
-// combos, and booleans — with the tapped widget focused. Each multiline field
-// keeps its own weight ± steppers. Write-back is per-field and only churns
-// widgets whose value actually changed, so a cancelled edit leaves the
-// serialized workflow byte-for-byte unchanged.
+// combos, booleans, and rgthree Power Lora Loader rows (the per-lora on/off +
+// strength widgets) — with the tapped widget focused. Each multiline field
+// keeps its own weight ± steppers; each lora row keeps its own strength
+// steppers. Write-back is per-field and only churns widgets whose value
+// actually changed, so a cancelled edit leaves the serialized workflow
+// byte-for-byte unchanged.
 //
 // The modal-shell primitive is consumed from @laurigates/comfy-modal-kit
 // (bundled INLINE into the build output). The fzf-lite fuzzy matcher also
@@ -302,7 +304,36 @@ export function bumpWeight(
 //   - "boolean"   : BOOLEAN (toggle)
 //   - null        : not editable here (buttons, converted/linked inputs, …)
 
-export type WidgetKind = "multiline" | "text" | "number" | "combo" | "boolean";
+export type WidgetKind = "multiline" | "text" | "number" | "combo" | "boolean" | "lora";
+
+// ============================================================
+// Power Lora Loader rows — rgthree custom widgets
+// ============================================================
+//
+// rgthree's Power Lora Loader (and kin) attaches one self-drawing "custom"
+// widget PER lora, whose `value` is an object — not a primitive the generic
+// controls understand. Shape (from rgthree's PowerLoraLoaderWidget):
+//   { on: boolean, lora: string | null, strength: number, strengthTwo: number | null }
+// `strengthTwo` is the separate CLIP strength, present (a number) only when the
+// row is in model+clip mode and null otherwise (serializeValue drops it then).
+//
+// Detection is SHAPE-based, not tied to rgthree's class names or the "lora_N"
+// widget-name convention, so it stays generic across forks/repackagings. The
+// three keys (`on`, `lora`, a numeric `strength`) are specific enough that a
+// stray object value on some unrelated widget won't misfire.
+
+export interface LoraWidgetValue {
+  on?: boolean;
+  lora?: string | null;
+  strength?: number;
+  strengthTwo?: number | null;
+}
+
+export function isLoraWidgetValue(v: unknown): v is LoraWidgetValue {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const o = v as Record<string, unknown>;
+  return "on" in o && "lora" in o && typeof o.strength === "number";
+}
 
 export function classifyEditableWidget(w: unknown): WidgetKind | null {
   if (!w || typeof w !== "object") return null;
@@ -314,6 +345,18 @@ export function classifyEditableWidget(w: unknown): WidgetKind | null {
   if (widget.hidden === true) return null;
   // Our own serialize:false expand button (and any unnamed control) is skipped.
   if (typeof widget.name !== "string" || widget.name === "") return null;
+
+  // rgthree Power Lora Loader rows: value = { on, lora, strength, strengthTwo }.
+  // Recognise these before the "custom" skip below so we can render a proper
+  // per-lora control instead of dropping them.
+  if (isLoraWidgetValue(widget.value)) return "lora";
+
+  // Other self-drawing "custom" widgets (rgthree's header row, the "➕ Add Lora"
+  // button whose value is an empty string, etc.) have no generic mapping.
+  // Rendering their raw value as a text box is wrong — the button was showing up
+  // as an empty input titled "➕ Add Lora" — so skip anything still typed
+  // "custom" once the lora rows above are handled.
+  if (typeStr === "custom") return null;
 
   // A fixed values list marks a combo regardless of value type.
   if (Array.isArray(widget.options?.values)) return "combo";
@@ -523,6 +566,46 @@ const CSS = `
 .pe-hint {
     color: #888;
     font-size: 12px;
+}
+.pe-lora {
+    /* Each lora reads as a card so a stack of them is scannable on mobile. */
+    border: 1px solid #2a2a36;
+    border-radius: 8px;
+    padding: 12px;
+    background: #17171f;
+}
+.pe-lora-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.pe-lora-on {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 auto;
+    touch-action: manipulation;
+}
+.pe-lora-name {
+    /* Shrink to share the row with the toggle; min-width:0 lets it truncate. */
+    flex: 1;
+    width: auto;
+    min-width: 0;
+}
+.pe-lora-strengths {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.pe-lora-strength-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.pe-lora-strength {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    text-align: center;
 }
 `;
 
@@ -744,6 +827,133 @@ export function buildField(
   label.className = "pe-label";
   label.textContent = widget.name ?? "";
   el.appendChild(label);
+
+  if (kind === "lora") {
+    // One rgthree Power Lora Loader row: an on/off toggle, the lora filename,
+    // and one (or two, in model+clip mode) touch-friendly strength steppers.
+    // We only ever read/write the widget's own {on, lora, strength, strengthTwo}
+    // value object — additive, and rgthree's value setter re-normalises it.
+    el.classList.add("pe-lora");
+    const initial = (isLoraWidgetValue(widget.value) ? widget.value : {}) as LoraWidgetValue;
+    const num = (v: unknown, fallback: number): number =>
+      typeof v === "number" && Number.isFinite(v) ? v : fallback;
+    const initialOn = initial.on !== false; // rgthree default is on:true
+    const initialLora = typeof initial.lora === "string" ? initial.lora : "";
+    const initialStrength = num(initial.strength, 1);
+    // Dual model/clip mode is signalled by a non-null strengthTwo on the value.
+    const hasTwo = initial.strengthTwo != null;
+    const initialStrengthTwo = num(initial.strengthTwo, initialStrength);
+
+    // A friendlier section label than the internal "lora_N" widget name: the
+    // filename the user actually recognises. Falls back to the widget name.
+    const base = initialLora.split(/[\\/]/).pop() ?? "";
+    label.textContent = base || widget.name || "lora";
+
+    const fmtStrength = (n: number): string =>
+      String(Math.round((Number.isFinite(n) ? n : 0) * 100) / 100);
+
+    // Head row: on/off toggle + the lora filename (editable text). Changing the
+    // filename is secondary; the native on-canvas picker is still available.
+    const head = document.createElement("div");
+    head.className = "pe-lora-head";
+    const onInput = document.createElement("input");
+    onInput.type = "checkbox";
+    onInput.className = "pe-lora-on";
+    onInput.checked = initialOn;
+    onInput.title = "Toggle this LoRA on/off";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "pe-input pe-lora-name";
+    nameInput.value = initialLora;
+    nameInput.spellcheck = false;
+    nameInput.autocapitalize = "off";
+    nameInput.autocomplete = "off";
+    nameInput.setAttribute("autocorrect", "off");
+    head.append(onInput, nameInput);
+
+    let strengthInput: HTMLInputElement | undefined;
+    let strengthTwoInput: HTMLInputElement | undefined;
+    const readNum = (input: HTMLInputElement | undefined, fallback: number): number => {
+      if (!input) return fallback;
+      const n = Number.parseFloat(input.value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    const readValue = (): LoraWidgetValue => ({
+      on: onInput.checked,
+      lora: nameInput.value,
+      strength: readNum(strengthInput, initialStrength),
+      // Preserve rgthree's dual-strength contract: only carry a second value in
+      // model+clip mode; otherwise keep whatever was there (null) untouched.
+      strengthTwo: hasTwo
+        ? readNum(strengthTwoInput, initialStrengthTwo)
+        : (initial.strengthTwo ?? null),
+    });
+    const onAnyChange = (): void => announce(readValue());
+
+    const makeStrengthRow = (
+      text: string,
+      initNum: number,
+    ): { row: HTMLElement; input: HTMLInputElement } => {
+      const row = document.createElement("div");
+      row.className = "pe-lora-strength-row";
+      const lab = document.createElement("label");
+      lab.className = "pe-hint";
+      lab.textContent = text;
+      const bar = document.createElement("div");
+      bar.className = "pe-bar";
+      const minus = makeBtn("−", `Decrease ${text}`);
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "pe-input pe-lora-strength";
+      input.step = "0.05";
+      input.inputMode = "decimal";
+      input.value = fmtStrength(initNum);
+      const plus = makeBtn("+", `Increase ${text}`);
+      const step = (delta: number): void => {
+        const cur = Number.parseFloat(input.value);
+        input.value = fmtStrength((Number.isFinite(cur) ? cur : initNum) + delta);
+        onAnyChange();
+      };
+      minus.addEventListener("click", () => step(-0.05));
+      plus.addEventListener("click", () => step(0.05));
+      input.addEventListener("input", onAnyChange);
+      bar.append(minus, input, plus);
+      row.append(lab, bar);
+      return { row, input };
+    };
+
+    onInput.addEventListener("change", onAnyChange);
+    nameInput.addEventListener("input", onAnyChange);
+
+    const strengths = document.createElement("div");
+    strengths.className = "pe-lora-strengths";
+    const sRow = makeStrengthRow(hasTwo ? "model strength" : "strength", initialStrength);
+    strengthInput = sRow.input;
+    strengths.appendChild(sRow.row);
+    if (hasTwo) {
+      const s2Row = makeStrengthRow("clip strength", initialStrengthTwo);
+      strengthTwoInput = s2Row.input;
+      strengths.appendChild(s2Row.row);
+    }
+
+    el.append(head, strengths);
+
+    return {
+      widget,
+      kind,
+      el,
+      read: readValue,
+      changed: () => {
+        const v = readValue();
+        if (v.on !== initialOn) return true;
+        if (v.lora !== initialLora) return true;
+        if (v.strength !== initialStrength) return true;
+        if (hasTwo && v.strengthTwo !== initialStrengthTwo) return true;
+        return false;
+      },
+      focus: () => (strengthInput ?? nameInput).focus(),
+    };
+  }
 
   if (kind === "boolean") {
     const initial = widget.value === true;

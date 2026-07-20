@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   bumpWeight,
   classifyEditableWidget,
+  isLoraWidgetValue,
   isMultilineStringWidget,
   isTargetWidget,
   TARGET_WIDGET_NAMES,
@@ -54,6 +55,55 @@ describe("classifyEditableWidget", () => {
   it("rejects nullish input defensively", () => {
     expect(classifyEditableWidget(null)).toBeNull();
     expect(classifyEditableWidget(undefined)).toBeNull();
+  });
+
+  it("buckets an rgthree Power Lora Loader row as 'lora'", () => {
+    // rgthree's PowerLoraLoaderWidget: type "custom", value is an object.
+    const row = {
+      name: "lora_1",
+      type: "custom",
+      value: { on: true, lora: "add_detail.safetensors", strength: 1, strengthTwo: null },
+    };
+    expect(classifyEditableWidget(row)).toBe("lora");
+  });
+
+  it("skips rgthree self-drawing custom widgets (header, ➕ Add Lora button)", () => {
+    // The "➕ Add Lora" button is type "custom" with an empty-string value — it
+    // was previously mis-rendered as a text box. It (and the header row whose
+    // value is a plain object) must classify as null now.
+    expect(classifyEditableWidget({ name: "➕ Add Lora", type: "custom", value: "" })).toBeNull();
+    expect(
+      classifyEditableWidget({
+        name: "PowerLoraLoaderHeaderWidget",
+        type: "custom",
+        value: { type: "PowerLoraLoaderHeaderWidget" },
+      }),
+    ).toBeNull();
+  });
+});
+
+// isLoraWidgetValue is the shape-based, class-name-agnostic detector for an
+// rgthree Power Lora Loader row value. Pure object->boolean predicate.
+describe("isLoraWidgetValue", () => {
+  it("accepts the {on, lora, strength, strengthTwo} shape", () => {
+    expect(
+      isLoraWidgetValue({ on: true, lora: "x.safetensors", strength: 1, strengthTwo: null }),
+    ).toBe(true);
+    // strengthTwo is optional (single-strength rows still qualify).
+    expect(isLoraWidgetValue({ on: false, lora: null, strength: 0.8 })).toBe(true);
+  });
+
+  it("rejects values missing the required keys or a numeric strength", () => {
+    expect(isLoraWidgetValue({ on: true, lora: "x" })).toBe(false); // no strength
+    expect(isLoraWidgetValue({ lora: "x", strength: 1 })).toBe(false); // no `on`
+    expect(isLoraWidgetValue({ on: true, lora: "x", strength: "1" })).toBe(false); // strength not a number
+  });
+
+  it("rejects arrays, primitives, and nullish input defensively", () => {
+    expect(isLoraWidgetValue(null)).toBe(false);
+    expect(isLoraWidgetValue(undefined)).toBe(false);
+    expect(isLoraWidgetValue("lora")).toBe(false);
+    expect(isLoraWidgetValue([{ on: true, lora: "x", strength: 1 }])).toBe(false);
   });
 });
 

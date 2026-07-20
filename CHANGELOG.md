@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.22](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.21...comfyui-prompt-editor-v0.1.22) (2026-07-20)
+
+
+### Features
+
+* **fields:** edit rgthree Power Lora Loader rows in the node editor ([#66](https://github.com/laurigates/comfyui-prompt-editor/issues/66)) ([a3d10bb](https://github.com/laurigates/comfyui-prompt-editor/commit/a3d10bb9515d0cf24e9c2ec2f404a1df22982043))
+
 ## [0.1.21](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.20...comfyui-prompt-editor-v0.1.21) (2026-07-17)
 
 

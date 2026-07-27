@@ -54,6 +54,24 @@ above the soft keyboard.
   sampler-info's fuzzy sampler list), the matching field mounts that richer inline
   control and falls back to the built-in one otherwise.
 
+### rgthree Power Lora Loader
+
+The editor renders one card per LoRA row — the on/off toggle, the filename, and
+touch strength steppers (one, or model + clip when the node's **Show Strengths**
+property is set to *Separate Model & Clip*). It also makes reachable the three
+things rgthree gates behind a right-click context menu and a LiteGraph menu:
+
+- **Tap the filename to pick from a card grid**, when
+  [comfyui-model-gallery](https://github.com/laurigates/comfyui-model-gallery)
+  is installed — searchable, with trigger words and training metadata for the
+  chosen file. Without that pack the filename stays an editable text box, exactly
+  as before.
+- **↑ / ↓ / ⨯ per row** to reorder and remove, and **➕ Add LoRA** to append one.
+
+Row changes apply **immediately** (and flush any pending field edits), because
+they change the very list the modal is rendering — Cancel does not undo them.
+Everything else still writes back only on Save.
+
 Write-back is **per-field and additive**: only widgets whose value actually
 changed are committed (Cmd/Ctrl+Enter or the Save button), so a cancelled edit
 leaves the serialized workflow byte-for-byte unchanged. If any field fails to

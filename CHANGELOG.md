@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.23](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.22...comfyui-prompt-editor-v0.1.23) (2026-07-27)
+
+
+### Features
+
+* **lora:** pick LoRAs from the card grid and manage rows in the editor ([#69](https://github.com/laurigates/comfyui-prompt-editor/issues/69)) ([4fc9dfd](https://github.com/laurigates/comfyui-prompt-editor/commit/4fc9dfd6fc5e092914bc6d585bd4e4aaadbc551c))
+
 ## [0.1.22](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.21...comfyui-prompt-editor-v0.1.22) (2026-07-20)
 
 

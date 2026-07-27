@@ -1,14 +1,18 @@
 /* web/dist bundle built by bun from src/ in this repository (see package.json). Inlines @laurigates/comfy-modal-kit (MIT) - a first-party library by the same publisher, published to npm with provenance attestation: https://www.npmjs.com/package/@laurigates/comfy-modal-kit */
 
-// node_modules/@laurigates/comfy-modal-kit/dist/index.js
+// ../comfy-modal-kit/dist/index.js
 var KEY = Symbol.for("laurigates.comfyModalKit");
 function getKit() {
   const g = globalThis;
   let kit = g[KEY];
   if (!kit) {
-    kit = { fieldProviders: [], activeModal: null, pointerClaim: null };
+    kit = { fieldProviders: [], modelPickers: [], activeModal: null, pointerClaim: null };
     g[KEY] = kit;
   }
+  if (!kit.fieldProviders)
+    kit.fieldProviders = [];
+  if (!kit.modelPickers)
+    kit.modelPickers = [];
   return kit;
 }
 function resolveFieldProvider(widget, node) {
@@ -307,6 +311,27 @@ function pointerGuard(e) {
   e.stopImmediatePropagation();
   dismissActiveModal();
 }
+function resolveModelPicker(category) {
+  let best = null;
+  let bestPriority = Number.NEGATIVE_INFINITY;
+  for (const p of getKit().modelPickers) {
+    let supported = false;
+    try {
+      supported = p.supports(category);
+    } catch (e) {
+      console.warn(`[comfy-modal-kit] model picker "${p.id}" supports() threw`, e);
+      supported = false;
+    }
+    if (!supported)
+      continue;
+    const priority = p.priority ?? 0;
+    if (priority > bestPriority) {
+      best = p;
+      bestPriority = priority;
+    }
+  }
+  return best;
+}
 var STYLE_ID2 = "cmp-shell-style";
 var CSS2 = `
 .cmp-backdrop {
@@ -589,6 +614,98 @@ function openModalShell(opts = {}) {
   }
   return controller;
 }
+var STYLE_ID3 = "cmp-overlay-style";
+var CSS3 = `
+.cmp-ov-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    touch-action: manipulation;
+}
+.cmp-ov-card {
+    background: #1c1c24;
+    border: 1px solid #33333f;
+    border-radius: 10px;
+    padding: 18px;
+    width: min(520px, calc(100% - 24px));
+    max-height: calc(100% - 24px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.cmp-ov-title { font-size: 15px; font-weight: 600; color: #e8e8ec; }
+.cmp-ov-msg { font-size: 13px; color: #b8b8c0; line-height: 1.5; word-break: break-word; }
+.cmp-ov-input {
+    font-size: 16px;
+    padding: 10px 12px;
+    background: #12121a;
+    border: 1px solid #3a3a44;
+    border-radius: 6px;
+    color: #e8e8ec;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.cmp-ov-input:focus { outline: none; border-color: #6ba6ff; }
+.cmp-ov-err { font-size: 12px; color: #ff7a7a; min-height: 14px; }
+.cmp-ov-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.cmp-ov-btn {
+    font-size: 13px;
+    padding: 9px 16px;
+    border-radius: 6px;
+    border: 1px solid #3a3a44;
+    background: #2a2a36;
+    color: #d8d8dc;
+    cursor: pointer;
+    font-family: inherit;
+    min-height: 38px;
+}
+.cmp-ov-btn:hover { background: #3a3a4a; color: #fff; }
+.cmp-ov-primary { background: #2f3a52; color: #9ec6ff; border-color: #4a5878; }
+.cmp-ov-primary:hover { background: #3a4868; color: #fff; }
+.cmp-ov-danger { background: #4a2230; color: #ff9eb0; border-color: #78384a; }
+.cmp-ov-danger:hover { background: #5c2a3c; color: #fff; }
+`;
+function openShellOverlay(shell, opts = {}) {
+  ensureStyleOnce(STYLE_ID3, CSS3);
+  const backdrop = document.createElement("div");
+  backdrop.className = "cmp-ov-backdrop";
+  const card = document.createElement("div");
+  card.className = "cmp-ov-card";
+  backdrop.appendChild(card);
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      dismiss();
+    }
+  };
+  let closed = false;
+  function close() {
+    if (closed)
+      return;
+    closed = true;
+    document.removeEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", shell._onKey, true);
+    backdrop.remove();
+  }
+  function dismiss() {
+    opts.onDismiss?.();
+    close();
+  }
+  backdrop.addEventListener("pointerdown", (e) => {
+    if (e.target === backdrop)
+      dismiss();
+  });
+  document.removeEventListener("keydown", shell._onKey, true);
+  document.addEventListener("keydown", onKey, true);
+  shell.dialog.appendChild(backdrop);
+  return { card, close };
+}
 function appendButtonWidget(node, label, onClick, opts = {}) {
   const prefix = opts.logPrefix ? `[${opts.logPrefix}]` : "[comfy-modal-kit]";
   try {
@@ -617,7 +734,9 @@ function appendButtonWidget(node, label, onClick, opts = {}) {
 // src/index.ts
 import { app } from "/scripts/app.js";
 var EXT_NAME = "comfyui-prompt-editor";
-var STYLE_ID3 = "pe-style";
+var STYLE_ID4 = "pe-style";
+var LORA_CATEGORY = "loras";
+var EDIT_BUTTON_LABEL = "⤢ Edit fields";
 var TARGET_WIDGET_NAMES = new Set([
   "text",
   "prompt",
@@ -722,6 +841,74 @@ function isLoraWidgetValue(v) {
   const o = v;
   return "on" in o && "lora" in o && typeof o.strength === "number";
 }
+var PROP_SHOW_STRENGTHS = "Show Strengths";
+var PROP_VALUE_SEPARATE = "Separate Model & Clip";
+function loraShowsDualStrength(node, value) {
+  const props = node?.properties;
+  const mode = props?.[PROP_SHOW_STRENGTHS];
+  if (typeof mode === "string")
+    return mode === PROP_VALUE_SEPARATE;
+  return value.strengthTwo != null;
+}
+function isEmptyLoraFile(lora) {
+  if (typeof lora !== "string")
+    return true;
+  const t = lora.trim();
+  return t === "" || t.toLowerCase() === "none";
+}
+function loraFileLabel(lora) {
+  if (isEmptyLoraFile(lora))
+    return "";
+  return lora.split(/[\\/]/).pop() ?? "";
+}
+function loraRowWidgets(node) {
+  return (node?.widgets ?? []).filter((w) => isLoraWidgetValue(w.value));
+}
+function removeLoraRow(node, widget) {
+  const list = node?.widgets;
+  if (!list)
+    return false;
+  const i = list.indexOf(widget);
+  if (i < 0)
+    return false;
+  list.splice(i, 1);
+  return true;
+}
+function moveLoraRow(node, widget, dir) {
+  const list = node?.widgets;
+  if (!list)
+    return false;
+  const from = list.indexOf(widget);
+  if (from < 0)
+    return false;
+  let to = -1;
+  for (let i = from + dir;i >= 0 && i < list.length; i += dir) {
+    if (isLoraWidgetValue(list[i]?.value)) {
+      to = i;
+      break;
+    }
+  }
+  if (to < 0)
+    return false;
+  list.splice(from, 1);
+  list.splice(to, 0, widget);
+  return true;
+}
+function canAddLoraRow(node) {
+  return typeof node?.addNewLoraWidget === "function";
+}
+function refitNode(node) {
+  try {
+    const n = node;
+    const computed = n?.computeSize?.();
+    if (computed && n?.size && typeof computed[1] === "number")
+      n.size[1] = computed[1];
+  } catch (e) {
+    console.warn(`[${EXT_NAME}] node re-fit failed`, e);
+  }
+  node?.setDirtyCanvas?.(true, true);
+  app.graph?.setDirtyCanvas?.(true, true);
+}
 function classifyEditableWidget(w) {
   if (!w || typeof w !== "object")
     return null;
@@ -775,7 +962,7 @@ function resolveNumberFormat(options) {
     step: step !== undefined && step > 0 ? step : undefined
   };
 }
-var CSS3 = `
+var CSS4 = `
 .pe-wrap {
     /* Plain layout column — NOT a scroll container. The modal shell's
        .cmp-body (flex:1; overflow-y:auto) is the single scroll region.
@@ -931,6 +1118,58 @@ var CSS3 = `
     min-width: 0;
     text-align: center;
 }
+/* The filename control when a cross-pack ModelPicker is available: a big tap
+   target showing the basename, opening the card grid. Replaces the text input
+   (which stays as the additive fallback when no picker is registered). */
+.pe-lora-pick {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    /* The basename can be long; keep the row one line tall. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pe-lora-summary {
+    margin: 8px 0 2px;
+}
+.pe-lora-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 10px;
+}
+.pe-lora-act {
+    min-width: 44px;
+}
+.pe-lora-del {
+    color: #ff9eb0;
+    border-color: #78384a;
+}
+.pe-lora-add {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+/* The picker overlay's scroll region. .cmp-ov-card is a max-height-capped flex
+   column with NO scroll of its own, and a ModelPickerControl.el is contractually
+   not a scroll container — so the host owns this element or the grid is clipped
+   and unreachable. min-height:0 defeats the flex item's default
+   min-height:auto, which would otherwise refuse to shrink below its content and
+   blow past the card's max-height. */
+.pe-pick-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+.pe-pick-card {
+    /* Give the grid room: the picker is the overlay's whole purpose. */
+    width: min(860px, calc(100% - 24px));
+    height: min(80vh, 720px);
+}
 `;
 function applyWidgetValue(widget, node, value) {
   widget.value = value;
@@ -997,7 +1236,64 @@ function makeBtn(label, title, cls) {
     b.title = title;
   return b;
 }
-function buildField(widget, kind, node = null, bus) {
+function pickModelFile(shell, picker, category, initialValue) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled)
+        return;
+      settled = true;
+      try {
+        ctl.destroy?.();
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] picker destroy failed`, e);
+      }
+      resolve(value);
+    };
+    const ov = openShellOverlay(shell, {
+      onDismiss: () => finish(null)
+    });
+    ov.card.classList.add("pe-pick-card");
+    const title = document.createElement("div");
+    title.className = "cmp-ov-title";
+    title.textContent = "Choose LoRA";
+    const scroll = document.createElement("div");
+    scroll.className = "pe-pick-scroll";
+    const ctl = picker.create({ category, initialValue });
+    scroll.appendChild(ctl.el);
+    const row = document.createElement("div");
+    row.className = "cmp-ov-actions";
+    const cancel = makeBtn("Cancel", "Keep the current file");
+    cancel.addEventListener("click", () => {
+      ov.close();
+      finish(null);
+    });
+    const choose = makeBtn("Choose", "Use the selected file", "pe-btn-primary");
+    choose.disabled = true;
+    choose.addEventListener("click", () => {
+      ov.close();
+      finish(ctl.getValue());
+    });
+    try {
+      ctl.onValueChange?.(() => {
+        choose.disabled = false;
+      });
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] picker onValueChange wiring failed`, e);
+      choose.disabled = false;
+    }
+    if (!ctl.onValueChange)
+      choose.disabled = false;
+    row.append(cancel, choose);
+    ov.card.append(title, scroll, row);
+    try {
+      ctl.focus?.();
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] picker focus failed`, e);
+    }
+  });
+}
+function buildField(widget, kind, node = null, bus, hooks) {
   const announce = (value) => {
     try {
       bus?.notify(widget, value);
@@ -1048,10 +1344,9 @@ function buildField(widget, kind, node = null, bus) {
     const initialOn = initial2.on !== false;
     const initialLora = typeof initial2.lora === "string" ? initial2.lora : "";
     const initialStrength = num(initial2.strength, 1);
-    const hasTwo = initial2.strengthTwo != null;
+    const hasTwo = loraShowsDualStrength(node, initial2);
     const initialStrengthTwo = num(initial2.strengthTwo, initialStrength);
-    const base = initialLora.split(/[\\/]/).pop() ?? "";
-    label.textContent = base || widget.name || "lora";
+    label.textContent = loraFileLabel(initialLora) || widget.name || "lora";
     const fmtStrength = (n) => String(Math.round((Number.isFinite(n) ? n : 0) * 100) / 100);
     const head = document.createElement("div");
     head.className = "pe-lora-head";
@@ -1060,15 +1355,61 @@ function buildField(widget, kind, node = null, bus) {
     onInput.className = "pe-lora-on";
     onInput.checked = initialOn;
     onInput.title = "Toggle this LoRA on/off";
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.className = "pe-input pe-lora-name";
-    nameInput.value = initialLora;
-    nameInput.spellcheck = false;
-    nameInput.autocapitalize = "off";
-    nameInput.autocomplete = "off";
-    nameInput.setAttribute("autocorrect", "off");
-    head.append(onInput, nameInput);
+    let currentLora = initialLora;
+    const shell = hooks?.getShell?.() ?? null;
+    const picker = shell ? resolveModelPicker(LORA_CATEGORY) : null;
+    let nameInput;
+    let nameBtn;
+    let summaryEl;
+    const renderSummary = () => {
+      if (!summaryEl || !picker?.createSummary)
+        return;
+      summaryEl.replaceChildren();
+      if (isEmptyLoraFile(currentLora))
+        return;
+      try {
+        summaryEl.appendChild(picker.createSummary({ category: LORA_CATEGORY, value: currentLora }));
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] lora summary failed for ${currentLora}`, e);
+      }
+    };
+    if (picker && shell) {
+      nameBtn = makeBtn(loraFileLabel(currentLora) || "None", "Choose a LoRA file", "pe-lora-name pe-lora-pick");
+      nameBtn.addEventListener("click", () => {
+        pickModelFile(shell, picker, LORA_CATEGORY, isEmptyLoraFile(currentLora) ? "" : currentLora).then((chosen) => {
+          if (chosen === null)
+            return;
+          currentLora = chosen;
+          if (nameBtn)
+            nameBtn.textContent = loraFileLabel(chosen) || "None";
+          label.textContent = loraFileLabel(chosen) || widget.name || "lora";
+          renderSummary();
+          onAnyChange();
+        }).catch((e) => {
+          console.warn(`[${EXT_NAME}] lora picker failed`, e);
+          notify({
+            severity: "error",
+            summary: "LoRA picker failed",
+            detail: e instanceof Error ? e.message : String(e)
+          });
+        });
+      });
+      head.append(onInput, nameBtn);
+      if (picker.createSummary) {
+        summaryEl = document.createElement("div");
+        summaryEl.className = "pe-lora-summary";
+      }
+    } else {
+      nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.className = "pe-input pe-lora-name";
+      nameInput.value = initialLora;
+      nameInput.spellcheck = false;
+      nameInput.autocapitalize = "off";
+      nameInput.autocomplete = "off";
+      nameInput.setAttribute("autocorrect", "off");
+      head.append(onInput, nameInput);
+    }
     let strengthInput;
     let strengthTwoInput;
     const readNum = (input, fallback) => {
@@ -1079,7 +1420,7 @@ function buildField(widget, kind, node = null, bus) {
     };
     const readValue = () => ({
       on: onInput.checked,
-      lora: nameInput.value,
+      lora: currentLora,
       strength: readNum(strengthInput, initialStrength),
       strengthTwo: hasTwo ? readNum(strengthTwoInput, initialStrengthTwo) : initial2.strengthTwo ?? null
     });
@@ -1113,7 +1454,10 @@ function buildField(widget, kind, node = null, bus) {
       return { row, input };
     };
     onInput.addEventListener("change", onAnyChange);
-    nameInput.addEventListener("input", onAnyChange);
+    nameInput?.addEventListener("input", () => {
+      currentLora = nameInput?.value ?? "";
+      onAnyChange();
+    });
     const strengths = document.createElement("div");
     strengths.className = "pe-lora-strengths";
     const sRow = makeStrengthRow(hasTwo ? "model strength" : "strength", initialStrength);
@@ -1124,7 +1468,48 @@ function buildField(widget, kind, node = null, bus) {
       strengthTwoInput = s2Row.input;
       strengths.appendChild(s2Row.row);
     }
-    el.append(head, strengths);
+    el.append(head);
+    if (summaryEl)
+      el.appendChild(summaryEl);
+    el.appendChild(strengths);
+    renderSummary();
+    if (hooks?.rebuild && node?.widgets) {
+      const actions = document.createElement("div");
+      actions.className = "pe-lora-actions";
+      const rows = loraRowWidgets(node);
+      const pos = rows.indexOf(widget);
+      const structural = (label2, run) => {
+        const b = makeBtn(label2, "", "pe-lora-act");
+        b.addEventListener("click", () => {
+          try {
+            if (!run())
+              return;
+          } catch (e) {
+            console.warn(`[${EXT_NAME}] lora row ${label2} failed`, e);
+            notify({
+              severity: "error",
+              summary: "Row change failed",
+              detail: e instanceof Error ? e.message : String(e)
+            });
+            return;
+          }
+          refitNode(node);
+          hooks.rebuild?.();
+        });
+        return b;
+      };
+      const up = structural("↑", () => moveLoraRow(node, widget, -1));
+      up.title = "Move this LoRA earlier in the stack";
+      up.disabled = pos <= 0;
+      const down = structural("↓", () => moveLoraRow(node, widget, 1));
+      down.title = "Move this LoRA later in the stack";
+      down.disabled = pos < 0 || pos >= rows.length - 1;
+      const del = structural("⨯", () => removeLoraRow(node, widget));
+      del.title = "Remove this LoRA row";
+      del.classList.add("pe-lora-del");
+      actions.append(up, down, del);
+      el.appendChild(actions);
+    }
     return {
       widget,
       kind,
@@ -1142,7 +1527,7 @@ function buildField(widget, kind, node = null, bus) {
           return true;
         return false;
       },
-      focus: () => (strengthInput ?? nameInput).focus()
+      focus: () => (strengthInput ?? nameInput ?? nameBtn)?.focus()
     };
   }
   if (kind === "boolean") {
@@ -1308,30 +1693,69 @@ function buildField(widget, kind, node = null, bus) {
     }
   };
 }
+function buildLoraAddStrip(node, hooks) {
+  if (!hooks.rebuild || !canAddLoraRow(node))
+    return null;
+  const shell = hooks.getShell?.() ?? null;
+  const picker = shell ? resolveModelPicker(LORA_CATEGORY) : null;
+  const strip = document.createElement("div");
+  strip.className = "pe-lora-add";
+  const addRow = (chosen) => {
+    try {
+      node.addNewLoraWidget?.(chosen);
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] addNewLoraWidget failed`, e);
+      notify({
+        severity: "error",
+        summary: "Could not add a LoRA row",
+        detail: e instanceof Error ? e.message : String(e)
+      });
+      return;
+    }
+    refitNode(node);
+    hooks.rebuild?.();
+  };
+  const btn = makeBtn("➕ Add LoRA", "Append a new LoRA row to this node");
+  btn.addEventListener("click", () => {
+    if (!picker || !shell) {
+      addRow();
+      return;
+    }
+    pickModelFile(shell, picker, LORA_CATEGORY, "").then((chosen) => {
+      if (chosen === null)
+        return;
+      addRow(chosen);
+    }).catch((e) => {
+      console.warn(`[${EXT_NAME}] lora picker failed`, e);
+      notify({
+        severity: "error",
+        summary: "LoRA picker failed",
+        detail: e instanceof Error ? e.message : String(e)
+      });
+    });
+  });
+  const hint = document.createElement("span");
+  hint.className = "pe-hint";
+  hint.textContent = "Row changes apply immediately (and save pending edits)";
+  strip.append(btn, hint);
+  return strip;
+}
 function openEditor(focusWidget, node) {
-  ensureStyleOnce(STYLE_ID3, CSS3);
+  ensureStyleOnce(STYLE_ID4, CSS4);
   const wrap = document.createElement("div");
   wrap.className = "pe-wrap";
   const fields = [];
   const bus = createFieldBus(fields, node);
-  for (const w of node?.widgets ?? []) {
-    const kind = classifyEditableWidget(w);
-    if (!kind)
-      continue;
-    const field = buildField(w, kind, node, bus);
-    fields.push(field);
-    wrap.appendChild(field.el);
-  }
-  if (fields.length === 0 && focusWidget) {
-    const field = buildField(focusWidget, "multiline", node, bus);
-    fields.push(field);
-    wrap.appendChild(field.el);
-  }
-  let committed = false;
-  const commit = () => {
-    if (committed)
-      return;
-    committed = true;
+  const destroyFields = () => {
+    for (const f of fields) {
+      try {
+        f._destroy?.();
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
+      }
+    }
+  };
+  const writeBack = () => {
     const failedNames = [];
     for (const f of fields) {
       try {
@@ -1349,6 +1773,40 @@ function openEditor(focusWidget, node) {
         detail: failedNames.join(", ")
       });
     }
+  };
+  const rebuild = () => {
+    writeBack();
+    destroyFields();
+    fields.length = 0;
+    wrap.replaceChildren();
+    build();
+  };
+  const hooks = { getShell: () => modal ?? null, rebuild };
+  function build() {
+    for (const w of node?.widgets ?? []) {
+      const kind = classifyEditableWidget(w);
+      if (!kind)
+        continue;
+      const field = buildField(w, kind, node, bus, hooks);
+      fields.push(field);
+      wrap.appendChild(field.el);
+    }
+    if (fields.length === 0 && focusWidget) {
+      const field = buildField(focusWidget, "multiline", node, bus, hooks);
+      fields.push(field);
+      wrap.appendChild(field.el);
+    }
+    const addStrip = buildLoraAddStrip(node, hooks);
+    if (addStrip)
+      wrap.appendChild(addStrip);
+  }
+  build();
+  let committed = false;
+  const commit = () => {
+    if (committed)
+      return;
+    committed = true;
+    writeBack();
     modal.close();
   };
   const nodeTitle = node?.title ?? node?.type ?? "node";
@@ -1367,13 +1825,7 @@ function openEditor(focusWidget, node) {
       }
     },
     onClose: () => {
-      for (const f of fields) {
-        try {
-          f._destroy?.();
-        } catch (e) {
-          console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
-        }
-      }
+      destroyFields();
       bus.destroy();
     }
   });
@@ -1411,12 +1863,14 @@ function enhanceNode(node) {
       return true;
     });
   }
-  if (!node._promptEditorNodeButtonAdded) {
-    node._promptEditorNodeButtonAdded = true;
-    appendButtonWidget(node, "⤢ Edit fields", () => openEditor(null, node), {
+  if (!hasEditButton(node)) {
+    appendButtonWidget(node, EDIT_BUTTON_LABEL, () => openEditor(null, node), {
       logPrefix: EXT_NAME
     });
   }
+}
+function hasEditButton(node) {
+  return !!node.widgets?.some((w) => w.name === EDIT_BUTTON_LABEL);
 }
 function refreshAllNodes() {
   const graph = app?.graph;
@@ -1439,11 +1893,19 @@ app.registerExtension({
 });
 export {
   resolveNumberFormat,
+  removeLoraRow,
+  moveLoraRow,
+  loraShowsDualStrength,
+  loraRowWidgets,
+  loraFileLabel,
   isTargetWidget,
   isMultilineStringWidget,
   isLoraWidgetValue,
+  isEmptyLoraFile,
+  enhanceNode,
   createFieldBus,
   classifyEditableWidget,
+  canAddLoraRow,
   bumpWeight,
   buildField,
   TARGET_WIDGET_NAMES

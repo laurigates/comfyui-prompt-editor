@@ -38,16 +38,29 @@ import {
   appendButtonWidget,
   type ButtonWidgetHost,
   ensureStyleOnce,
+  type ModalShellController,
+  type ModelPicker,
   notify,
   openModalShell,
+  openShellOverlay,
   type PointerPatchableWidget,
   patchWidgetPointer,
   resolveFieldProvider,
+  resolveModelPicker,
 } from "@laurigates/comfy-modal-kit";
 import { app } from "/scripts/app.js";
 
 const EXT_NAME = "comfyui-prompt-editor";
 const STYLE_ID = "pe-style";
+
+// The folder_paths category every rgthree Power Lora Loader row draws from.
+// Fixed, not derived: a lora row is always a lora.
+const LORA_CATEGORY = "loras";
+
+// The node-level entry-point button's label. Doubles as its widget NAME (the
+// second argument to LiteGraph's addWidget), which is how we detect that it is
+// still present — see enhanceNode.
+const EDIT_BUTTON_LABEL = "⤢ Edit fields";
 
 // ============================================================
 // Types
@@ -76,6 +89,9 @@ interface PromptWidget {
   // set widget.serialize = false directly. See enhanceNode's button.
   serialize?: boolean;
   // Idempotency guard stamped on the widget so the tap interception applies once.
+  // Stamped on the WIDGET, so a node that clears its widgets during configure()
+  // (rgthree's Power Lora Loader) discards the stamp along with the widget and
+  // gets re-patched — unlike a node-level stamp. See enhanceNode.
   _promptEditorPointerPatched?: boolean;
 }
 
@@ -89,8 +105,6 @@ interface PromptNode {
     callback: () => void,
     options?: Record<string, unknown>,
   ) => PromptWidget | undefined;
-  // Idempotency guard: the node-level "Edit fields" button is added once.
-  _promptEditorNodeButtonAdded?: boolean;
 }
 
 // ============================================================
@@ -333,6 +347,139 @@ export function isLoraWidgetValue(v: unknown): v is LoraWidgetValue {
   if (!v || typeof v !== "object" || Array.isArray(v)) return false;
   const o = v as Record<string, unknown>;
   return "on" in o && "lora" in o && typeof o.strength === "number";
+}
+
+// rgthree's node PROPERTY that decides whether a row shows one strength or two.
+// It is the authoritative signal — `PowerLoraLoaderWidget.draw()` reads exactly
+// this and writes `value.strengthTwo` from it — whereas a row's own
+// `strengthTwo` merely reflects the last draw, so it is null on a row the user
+// switched to separate mode but has not scrolled into view yet.
+const PROP_SHOW_STRENGTHS = "Show Strengths";
+const PROP_VALUE_SEPARATE = "Separate Model & Clip";
+
+/**
+ * Whether a row should offer a second (CLIP) strength. Prefers rgthree's node
+ * property; falls back to the value's own shape for a node that doesn't carry
+ * the property at all (a fork, a repackaging, or a synthetic test node).
+ */
+export function loraShowsDualStrength(node: unknown, value: LoraWidgetValue): boolean {
+  const props = (node as { properties?: Record<string, unknown> } | null | undefined)?.properties;
+  const mode = props?.[PROP_SHOW_STRENGTHS];
+  if (typeof mode === "string") return mode === PROP_VALUE_SEPARATE;
+  return value.strengthTwo != null;
+}
+
+/**
+ * Whether a stored lora filename means "nothing selected". rgthree's own
+ * chooser prepends a literal `"None"` entry (`utils_menu.js`), which its
+ * backend `get_lora_by_filename` cannot resolve — so it is a sentinel, not a
+ * file.
+ *
+ * DISPLAY ONLY. The sentinel is never normalised away on write-back: rewriting
+ * an untouched row's `"None"` to `""` would churn `widgets_values` on a row the
+ * user never touched, breaking the byte-identical round-trip this editor
+ * promises.
+ */
+export function isEmptyLoraFile(lora: unknown): boolean {
+  if (typeof lora !== "string") return true;
+  const t = lora.trim();
+  return t === "" || t.toLowerCase() === "none";
+}
+
+/** The basename to show for a lora file, or "" when nothing is selected. */
+export function loraFileLabel(lora: unknown): string {
+  if (isEmptyLoraFile(lora)) return "";
+  return (lora as string).split(/[\\/]/).pop() ?? "";
+}
+
+// ============================================================
+// Power Lora Loader row management — plain node.widgets splices
+// ============================================================
+//
+// rgthree gates remove/reorder behind a right-click context menu and "➕ Add
+// Lora" behind a LiteGraph menu — all three unreachable on touch. Its own menu
+// handlers are plain `node.widgets` array operations (`removeArrayItem` /
+// `moveArrayItem` in power_lora_loader.js), so we do exactly what they do.
+//
+// Detection stays SHAPE-based (isLoraWidgetValue) rather than rgthree's
+// name-based `startsWith("lora_")`, matching this pack's existing classifier, so
+// a fork that renames the rows still reorders correctly.
+
+/** The lora rows on a node, in node order. */
+export function loraRowWidgets(node: PromptNode | null): PromptWidget[] {
+  return (node?.widgets ?? []).filter((w) => isLoraWidgetValue(w.value));
+}
+
+/** Remove one lora row. Returns false when the widget isn't on the node. */
+export function removeLoraRow(node: PromptNode | null, widget: PromptWidget): boolean {
+  const list = node?.widgets;
+  if (!list) return false;
+  const i = list.indexOf(widget);
+  if (i < 0) return false;
+  list.splice(i, 1);
+  return true;
+}
+
+/**
+ * Move one lora row one position earlier (`dir` -1) or later (`dir` +1) among
+ * the OTHER lora rows, stepping over rgthree's interleaved divider / header /
+ * spacer / button widgets. Returns false when there is no row to swap with (the
+ * row is already first/last) — the caller disables the affordance.
+ *
+ * `node.widgets` order IS the `widgets_values` serialization order, so this is
+ * the operation that actually reorders the LoRA stack.
+ */
+export function moveLoraRow(node: PromptNode | null, widget: PromptWidget, dir: -1 | 1): boolean {
+  const list = node?.widgets;
+  if (!list) return false;
+  const from = list.indexOf(widget);
+  if (from < 0) return false;
+  let to = -1;
+  for (let i = from + dir; i >= 0 && i < list.length; i += dir) {
+    if (isLoraWidgetValue(list[i]?.value)) {
+      to = i;
+      break;
+    }
+  }
+  if (to < 0) return false;
+  list.splice(from, 1);
+  list.splice(to, 0, widget);
+  return true;
+}
+
+/**
+ * Whether this node exposes rgthree's row factory. TypeScript `private` erases
+ * at compile time, so `addNewLoraWidget` is a plain prototype method on the
+ * shipped `web/comfyui/power_lora_loader.js` — but it is still rgthree's
+ * internal API, so every entry point that uses it sits behind this probe. A
+ * future refactor there degrades to a missing button, never a throw.
+ */
+export function canAddLoraRow(node: PromptNode | null): boolean {
+  return typeof (node as LoraLoaderNode | null)?.addNewLoraWidget === "function";
+}
+
+/** The rgthree-specific surface the row-management affordances reach into. */
+interface LoraLoaderNode extends PromptNode {
+  addNewLoraWidget?: (lora?: string) => PromptWidget | undefined;
+  computeSize?: () => number[];
+  size?: number[];
+}
+
+/**
+ * Re-fit the node to its widgets after a structural change, then redraw. Set
+ * (not `Math.max`'d) so a removed row actually shrinks the node; a user's manual
+ * enlargement is not worth preserving across an add/remove.
+ */
+function refitNode(node: PromptNode | null): void {
+  try {
+    const n = node as LoraLoaderNode | null;
+    const computed = n?.computeSize?.();
+    if (computed && n?.size && typeof computed[1] === "number") n.size[1] = computed[1];
+  } catch (e) {
+    console.warn(`[${EXT_NAME}] node re-fit failed`, e);
+  }
+  node?.setDirtyCanvas?.(true, true);
+  app.graph?.setDirtyCanvas?.(true, true);
 }
 
 export function classifyEditableWidget(w: unknown): WidgetKind | null {
@@ -607,6 +754,58 @@ const CSS = `
     min-width: 0;
     text-align: center;
 }
+/* The filename control when a cross-pack ModelPicker is available: a big tap
+   target showing the basename, opening the card grid. Replaces the text input
+   (which stays as the additive fallback when no picker is registered). */
+.pe-lora-pick {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    /* The basename can be long; keep the row one line tall. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.pe-lora-summary {
+    margin: 8px 0 2px;
+}
+.pe-lora-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 10px;
+}
+.pe-lora-act {
+    min-width: 44px;
+}
+.pe-lora-del {
+    color: #ff9eb0;
+    border-color: #78384a;
+}
+.pe-lora-add {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+/* The picker overlay's scroll region. .cmp-ov-card is a max-height-capped flex
+   column with NO scroll of its own, and a ModelPickerControl.el is contractually
+   not a scroll container — so the host owns this element or the grid is clipped
+   and unreachable. min-height:0 defeats the flex item's default
+   min-height:auto, which would otherwise refuse to shrink below its content and
+   blow past the card's max-height. */
+.pe-pick-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+.pe-pick-card {
+    /* Give the grid room: the picker is the overlay's whole purpose. */
+    width: min(860px, calc(100% - 24px));
+    height: min(80vh, 720px);
+}
 `;
 
 // ============================================================
@@ -756,11 +955,125 @@ function makeBtn(label: string, title: string, cls?: string): HTMLButtonElement 
   return b;
 }
 
+// ============================================================
+// Model-file picker overlay — the cross-pack card grid, in-shell
+// ============================================================
+//
+// A lora row's filename is a `folder_paths` "loras" entry, and a sibling pack
+// (comfyui-model-gallery) can render a searchable card grid for exactly that.
+// It registers a kit ModelPicker keyed on the CATEGORY, because a lora row is a
+// `type: "custom"` widget with no `options.values` and so cannot be matched by
+// the widget-keyed FieldProvider registry (kit ADR-0003).
+//
+// Single-modal discipline means this cannot be a second openModalShell — it is
+// an in-shell overlay (kit ADR-0002).
+
+/** What the LoRA row needs from its host modal. Both members are optional: a
+ *  caller with neither (the unit tests, a future single-field host) gets the
+ *  built-in text input and no row-management strip. */
+export interface LoraRowHooks {
+  /**
+   * The open shell, resolved LAZILY. The first batch of fields is built before
+   * `openModalShell` returns, so a plain value would be null forever.
+   */
+  getShell?: () => ModalShellController | null;
+  /**
+   * Apply pending edits, then re-render the modal body. Called after a
+   * structural change to `node.widgets` (add / remove / reorder), because the
+   * field list the modal is rendering no longer matches the node.
+   */
+  rebuild?: () => void;
+}
+
+/**
+ * Open the registered model picker for `category` as an in-shell overlay.
+ * Resolves the chosen filename, or null on Cancel / Esc / backdrop tap.
+ *
+ * The Choose button starts disabled and enables on the first selection, so
+ * confirming can never write back a value the user did not actually pick.
+ */
+function pickModelFile(
+  shell: ModalShellController,
+  picker: ModelPicker,
+  category: string,
+  initialValue: string,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      try {
+        ctl.destroy?.();
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] picker destroy failed`, e);
+      }
+      resolve(value);
+    };
+
+    const ov = openShellOverlay(shell, {
+      onDismiss: () => finish(null),
+    });
+    ov.card.classList.add("pe-pick-card");
+
+    const title = document.createElement("div");
+    title.className = "cmp-ov-title";
+    title.textContent = "Choose LoRA";
+
+    // THE detail that breaks this otherwise: `.cmp-ov-card` is a max-height-
+    // capped `display:flex` column with NO scroll region of its own, while a
+    // ModelPickerControl.el is contractually NOT a scroll container (kit
+    // ADR-0003). Without this wrapper the grid is clipped and every file below
+    // the fold is unreachable. `min-height: 0` is required too — a flex item's
+    // default `min-height: auto` refuses to shrink below its content, which
+    // would push the card straight past its max-height.
+    const scroll = document.createElement("div");
+    scroll.className = "pe-pick-scroll";
+
+    const ctl = picker.create({ category, initialValue });
+    scroll.appendChild(ctl.el);
+
+    const row = document.createElement("div");
+    row.className = "cmp-ov-actions";
+    const cancel = makeBtn("Cancel", "Keep the current file");
+    cancel.addEventListener("click", () => {
+      ov.close();
+      finish(null);
+    });
+    const choose = makeBtn("Choose", "Use the selected file", "pe-btn-primary");
+    choose.disabled = true;
+    choose.addEventListener("click", () => {
+      ov.close();
+      finish(ctl.getValue());
+    });
+    try {
+      ctl.onValueChange?.(() => {
+        choose.disabled = false;
+      });
+    } catch (e) {
+      // A picker without a change signal still works — the user just has to
+      // tap a card and then Choose, so enable the button up front instead.
+      console.warn(`[${EXT_NAME}] picker onValueChange wiring failed`, e);
+      choose.disabled = false;
+    }
+    if (!ctl.onValueChange) choose.disabled = false;
+
+    row.append(cancel, choose);
+    ov.card.append(title, scroll, row);
+    try {
+      ctl.focus?.();
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] picker focus failed`, e);
+    }
+  });
+}
+
 export function buildField(
   widget: PromptWidget,
   kind: WidgetKind,
   node: PromptNode | null = null,
   bus?: FieldBus,
+  hooks?: LoraRowHooks,
 ): FieldRow {
   // Every control announces its change through the bus so sibling-aware
   // controls see the LIVE value. Fail-soft: no bus (an existing call site, a
@@ -840,20 +1153,22 @@ export function buildField(
     const initialOn = initial.on !== false; // rgthree default is on:true
     const initialLora = typeof initial.lora === "string" ? initial.lora : "";
     const initialStrength = num(initial.strength, 1);
-    // Dual model/clip mode is signalled by a non-null strengthTwo on the value.
-    const hasTwo = initial.strengthTwo != null;
+    // Dual model/clip mode comes from rgthree's node PROPERTY, which is what its
+    // own draw() reads. A row's `strengthTwo` only reflects the last draw, so it
+    // is still null on a row switched to separate mode but not yet redrawn —
+    // deriving the mode from it alone hides the CLIP strength on exactly those
+    // rows.
+    const hasTwo = loraShowsDualStrength(node, initial);
     const initialStrengthTwo = num(initial.strengthTwo, initialStrength);
 
     // A friendlier section label than the internal "lora_N" widget name: the
     // filename the user actually recognises. Falls back to the widget name.
-    const base = initialLora.split(/[\\/]/).pop() ?? "";
-    label.textContent = base || widget.name || "lora";
+    label.textContent = loraFileLabel(initialLora) || widget.name || "lora";
 
     const fmtStrength = (n: number): string =>
       String(Math.round((Number.isFinite(n) ? n : 0) * 100) / 100);
 
-    // Head row: on/off toggle + the lora filename (editable text). Changing the
-    // filename is secondary; the native on-canvas picker is still available.
+    // Head row: on/off toggle + the lora filename control.
     const head = document.createElement("div");
     head.className = "pe-lora-head";
     const onInput = document.createElement("input");
@@ -861,15 +1176,81 @@ export function buildField(
     onInput.className = "pe-lora-on";
     onInput.checked = initialOn;
     onInput.title = "Toggle this LoRA on/off";
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.className = "pe-input pe-lora-name";
-    nameInput.value = initialLora;
-    nameInput.spellcheck = false;
-    nameInput.autocapitalize = "off";
-    nameInput.autocomplete = "off";
-    nameInput.setAttribute("autocorrect", "off");
-    head.append(onInput, nameInput);
+
+    // The chosen filename, tracked in one place so read-back is identical on
+    // both the picker and the text-input path. Seeded with the RAW stored string
+    // (not a normalised one) so an untouched row — including one holding
+    // rgthree's "None" sentinel — round-trips byte-for-byte.
+    let currentLora = initialLora;
+
+    // The picker path: a sibling pack (comfyui-model-gallery) registers a
+    // category-keyed ModelPicker, so tapping the filename opens a searchable
+    // card grid with trigger words and training metadata. Requires a host shell
+    // to mount the overlay in. Additive-fallback: no picker registered (or no
+    // shell) → the plain text input below, exactly as before.
+    const shell = hooks?.getShell?.() ?? null;
+    const picker = shell ? resolveModelPicker(LORA_CATEGORY) : null;
+
+    let nameInput: HTMLInputElement | undefined;
+    let nameBtn: HTMLButtonElement | undefined;
+    let summaryEl: HTMLElement | undefined;
+
+    const renderSummary = (): void => {
+      if (!summaryEl || !picker?.createSummary) return;
+      summaryEl.replaceChildren();
+      if (isEmptyLoraFile(currentLora)) return;
+      try {
+        summaryEl.appendChild(
+          picker.createSummary({ category: LORA_CATEGORY, value: currentLora }),
+        );
+      } catch (e) {
+        // The strip is decoration; a provider that fails must not take the row
+        // (or the modal) with it.
+        console.warn(`[${EXT_NAME}] lora summary failed for ${currentLora}`, e);
+      }
+    };
+
+    if (picker && shell) {
+      nameBtn = makeBtn(
+        loraFileLabel(currentLora) || "None",
+        "Choose a LoRA file",
+        "pe-lora-name pe-lora-pick",
+      );
+      nameBtn.addEventListener("click", () => {
+        pickModelFile(shell, picker, LORA_CATEGORY, isEmptyLoraFile(currentLora) ? "" : currentLora)
+          .then((chosen) => {
+            if (chosen === null) return; // cancelled — leave the row untouched
+            currentLora = chosen;
+            if (nameBtn) nameBtn.textContent = loraFileLabel(chosen) || "None";
+            label.textContent = loraFileLabel(chosen) || widget.name || "lora";
+            renderSummary();
+            onAnyChange();
+          })
+          .catch((e) => {
+            console.warn(`[${EXT_NAME}] lora picker failed`, e);
+            notify({
+              severity: "error",
+              summary: "LoRA picker failed",
+              detail: e instanceof Error ? e.message : String(e),
+            });
+          });
+      });
+      head.append(onInput, nameBtn);
+      if (picker.createSummary) {
+        summaryEl = document.createElement("div");
+        summaryEl.className = "pe-lora-summary";
+      }
+    } else {
+      nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.className = "pe-input pe-lora-name";
+      nameInput.value = initialLora;
+      nameInput.spellcheck = false;
+      nameInput.autocapitalize = "off";
+      nameInput.autocomplete = "off";
+      nameInput.setAttribute("autocorrect", "off");
+      head.append(onInput, nameInput);
+    }
 
     let strengthInput: HTMLInputElement | undefined;
     let strengthTwoInput: HTMLInputElement | undefined;
@@ -880,10 +1261,11 @@ export function buildField(
     };
     const readValue = (): LoraWidgetValue => ({
       on: onInput.checked,
-      lora: nameInput.value,
+      lora: currentLora,
       strength: readNum(strengthInput, initialStrength),
       // Preserve rgthree's dual-strength contract: only carry a second value in
-      // model+clip mode; otherwise keep whatever was there (null) untouched.
+      // model+clip mode; otherwise keep whatever was there (null) untouched —
+      // never normalise a row the user didn't edit.
       strengthTwo: hasTwo
         ? readNum(strengthTwoInput, initialStrengthTwo)
         : (initial.strengthTwo ?? null),
@@ -923,7 +1305,10 @@ export function buildField(
     };
 
     onInput.addEventListener("change", onAnyChange);
-    nameInput.addEventListener("input", onAnyChange);
+    nameInput?.addEventListener("input", () => {
+      currentLora = nameInput?.value ?? "";
+      onAnyChange();
+    });
 
     const strengths = document.createElement("div");
     strengths.className = "pe-lora-strengths";
@@ -936,7 +1321,54 @@ export function buildField(
       strengths.appendChild(s2Row.row);
     }
 
-    el.append(head, strengths);
+    el.append(head);
+    if (summaryEl) el.appendChild(summaryEl);
+    el.appendChild(strengths);
+    renderSummary();
+
+    // Row management: reorder + remove, unreachable on touch in rgthree (they
+    // live behind a right-click context menu). Only offered when there is a host
+    // that can re-render itself — the field list changes underneath the modal, so
+    // a host with no rebuild() would be left rendering a stale list.
+    if (hooks?.rebuild && node?.widgets) {
+      const actions = document.createElement("div");
+      actions.className = "pe-lora-actions";
+      const rows = loraRowWidgets(node);
+      const pos = rows.indexOf(widget);
+
+      const structural = (label: string, run: () => boolean): HTMLButtonElement => {
+        const b = makeBtn(label, "", "pe-lora-act");
+        b.addEventListener("click", () => {
+          try {
+            if (!run()) return;
+          } catch (e) {
+            console.warn(`[${EXT_NAME}] lora row ${label} failed`, e);
+            notify({
+              severity: "error",
+              summary: "Row change failed",
+              detail: e instanceof Error ? e.message : String(e),
+            });
+            return;
+          }
+          refitNode(node);
+          hooks.rebuild?.();
+        });
+        return b;
+      };
+
+      const up = structural("↑", () => moveLoraRow(node, widget, -1));
+      up.title = "Move this LoRA earlier in the stack";
+      up.disabled = pos <= 0;
+      const down = structural("↓", () => moveLoraRow(node, widget, 1));
+      down.title = "Move this LoRA later in the stack";
+      down.disabled = pos < 0 || pos >= rows.length - 1;
+      const del = structural("⨯", () => removeLoraRow(node, widget));
+      del.title = "Remove this LoRA row";
+      del.classList.add("pe-lora-del");
+
+      actions.append(up, down, del);
+      el.appendChild(actions);
+    }
 
     return {
       widget,
@@ -951,7 +1383,7 @@ export function buildField(
         if (hasTwo && v.strengthTwo !== initialStrengthTwo) return true;
         return false;
       },
-      focus: () => (strengthInput ?? nameInput).focus(),
+      focus: () => (strengthInput ?? nameInput ?? nameBtn)?.focus(),
     };
   }
 
@@ -1137,6 +1569,75 @@ export function buildField(
 }
 
 // ============================================================
+// "➕ Add LoRA" strip — the node-level structural affordance
+// ============================================================
+//
+// rgthree's own "➕ Add Lora" is a canvas button that opens a LiteGraph menu, so
+// it is as unreachable on touch as the per-row context menu. This strip is the
+// node-level counterpart to the per-row ↑/↓/⨯ buttons, and it also carries the
+// one-line warning that structural edits are not undone by Cancel.
+//
+// Returns null unless the node actually exposes rgthree's row factory AND the
+// host can re-render — an entry point that can't complete its own action is
+// worse than an absent one.
+
+function buildLoraAddStrip(node: PromptNode | null, hooks: LoraRowHooks): HTMLElement | null {
+  if (!hooks.rebuild || !canAddLoraRow(node)) return null;
+  const shell = hooks.getShell?.() ?? null;
+  const picker = shell ? resolveModelPicker(LORA_CATEGORY) : null;
+
+  const strip = document.createElement("div");
+  strip.className = "pe-lora-add";
+
+  const addRow = (chosen?: string): void => {
+    try {
+      (node as LoraLoaderNode).addNewLoraWidget?.(chosen);
+    } catch (e) {
+      console.warn(`[${EXT_NAME}] addNewLoraWidget failed`, e);
+      notify({
+        severity: "error",
+        summary: "Could not add a LoRA row",
+        detail: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    refitNode(node);
+    hooks.rebuild?.();
+  };
+
+  const btn = makeBtn("➕ Add LoRA", "Append a new LoRA row to this node");
+  btn.addEventListener("click", () => {
+    // With a picker: choose the file first, so the new row lands populated
+    // instead of empty. Without one: append an empty row and let the user type
+    // into its text input (the additive fallback).
+    if (!picker || !shell) {
+      addRow();
+      return;
+    }
+    pickModelFile(shell, picker, LORA_CATEGORY, "")
+      .then((chosen) => {
+        if (chosen === null) return; // cancelled — add nothing
+        addRow(chosen);
+      })
+      .catch((e) => {
+        console.warn(`[${EXT_NAME}] lora picker failed`, e);
+        notify({
+          severity: "error",
+          summary: "LoRA picker failed",
+          detail: e instanceof Error ? e.message : String(e),
+        });
+      });
+  });
+
+  const hint = document.createElement("span");
+  hint.className = "pe-hint";
+  hint.textContent = "Row changes apply immediately (and save pending edits)";
+
+  strip.append(btn, hint);
+  return strip;
+}
+
+// ============================================================
 // Modal — full-viewport all-fields node editor
 // ============================================================
 
@@ -1149,31 +1650,28 @@ function openEditor(
   const wrap = document.createElement("div");
   wrap.className = "pe-wrap";
 
-  // Build a field for every editable widget on the node, in node order. The bus
-  // is created first and closes over `fields` by reference, so a control built
-  // early can still resolve a sibling whose row is built later in this loop.
+  // The bus is created first and closes over `fields` BY REFERENCE, so a control
+  // built early can still resolve a sibling whose row is built later — and so a
+  // rebuild must MUTATE `fields` in place, never reassign it.
   const fields: FieldRow[] = [];
   const bus = createFieldBus(fields, node);
-  for (const w of node?.widgets ?? []) {
-    const kind = classifyEditableWidget(w);
-    if (!kind) continue;
-    const field = buildField(w, kind, node, bus);
-    fields.push(field);
-    wrap.appendChild(field.el);
-  }
 
-  // Degenerate fallback: nothing classified (e.g. a lone text widget the
-  // classifier somehow skipped) → still edit the tapped widget as multiline.
-  if (fields.length === 0 && focusWidget) {
-    const field = buildField(focusWidget, "multiline", node, bus);
-    fields.push(field);
-    wrap.appendChild(field.el);
-  }
+  const destroyFields = (): void => {
+    for (const f of fields) {
+      try {
+        f._destroy?.();
+      } catch (e) {
+        console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
+      }
+    }
+  };
 
-  let committed = false;
-  const commit = (): void => {
-    if (committed) return;
-    committed = true;
+  // Apply every changed field to its widget. Extracted from commit() because a
+  // structural row change also has to flush: rebuilding re-reads the field list
+  // from node.widgets, so an unsaved edit in an unrelated field (a prompt the
+  // user just typed) would otherwise be silently discarded by tapping ⨯ on a
+  // LoRA row.
+  const writeBack = (): void => {
     // Collect fields whose write-back throws so a partially-failed save is
     // surfaced via a copyable popup — on a touch/mobile frontend there is no
     // devtools trail to inspect the console.warn below.
@@ -1193,6 +1691,52 @@ function openEditor(
         detail: failedNames.join(", "),
       });
     }
+  };
+
+  // Structural row edits (add / remove / reorder) change the very list the modal
+  // is rendering, so they apply IMMEDIATELY and re-render — Cancel will not undo
+  // them (the strip says so). Flush first so nothing already typed is lost.
+  const rebuild = (): void => {
+    writeBack();
+    destroyFields();
+    fields.length = 0;
+    wrap.replaceChildren();
+    build();
+  };
+
+  // Lazily resolved: the first build runs before openModalShell returns, so a
+  // shell captured by value would be null forever.
+  const hooks: LoraRowHooks = { getShell: () => modal ?? null, rebuild };
+
+  // Build a field for every editable widget on the node, in node order.
+  function build(): void {
+    for (const w of node?.widgets ?? []) {
+      const kind = classifyEditableWidget(w);
+      if (!kind) continue;
+      const field = buildField(w, kind, node, bus, hooks);
+      fields.push(field);
+      wrap.appendChild(field.el);
+    }
+
+    // Degenerate fallback: nothing classified (e.g. a lone text widget the
+    // classifier somehow skipped) → still edit the tapped widget as multiline.
+    if (fields.length === 0 && focusWidget) {
+      const field = buildField(focusWidget, "multiline", node, bus, hooks);
+      fields.push(field);
+      wrap.appendChild(field.el);
+    }
+
+    const addStrip = buildLoraAddStrip(node, hooks);
+    if (addStrip) wrap.appendChild(addStrip);
+  }
+
+  build();
+
+  let committed = false;
+  const commit = (): void => {
+    if (committed) return;
+    committed = true;
+    writeBack();
     modal.close();
   };
 
@@ -1218,13 +1762,7 @@ function openEditor(
     onClose: () => {
       // Tear down any provider-supplied controls (listeners/timers) when the
       // modal closes — whether via Save, Esc, or a coordinator dismiss.
-      for (const f of fields) {
-        try {
-          f._destroy?.();
-        } catch (e) {
-          console.warn(`[${EXT_NAME}] field destroy failed for ${f.widget.name}`, e);
-        }
-      }
+      destroyFields();
       // The bus lives for exactly one modal session; drop any subscriber a
       // control forgot to unsubscribe.
       bus.destroy();
@@ -1259,7 +1797,7 @@ function openEditor(
 // Wiring
 // ============================================================
 
-function enhanceNode(node: PromptNode | null): void {
+export function enhanceNode(node: PromptNode | null): void {
   if (!node?.widgets) return;
 
   // Does the node have any widget the all-fields editor can edit? The button
@@ -1288,15 +1826,30 @@ function enhanceNode(node: PromptNode | null): void {
   // A distinct node-level "Edit fields" button appended to every node with
   // editable widgets. This is the universal entry point (works on nodes with no
   // text widget at all) and doubles as the version-skew safety net for Strategy
-  // A. Opens with no specific focus (the first field). Added at most once per
-  // node. The serialize:false / keep-last workflow-corruption hazard handling
-  // lives in the kit's appendButtonWidget.
-  if (!node._promptEditorNodeButtonAdded) {
-    node._promptEditorNodeButtonAdded = true;
-    appendButtonWidget(node as ButtonWidgetHost, "⤢ Edit fields", () => openEditor(null, node), {
+  // A. Opens with no specific focus (the first field). The serialize:false /
+  // keep-last workflow-corruption hazard handling lives in the kit's
+  // appendButtonWidget.
+  //
+  // Idempotency is by PRESENCE, not by a once-per-node boolean stamp. A stamp is
+  // wrong for any node that clears its own widgets during configure(): rgthree's
+  // Power Lora Loader does exactly that —
+  //   `while (this.widgets?.length) this.removeWidget(0)`
+  // (power_lora_loader.js) — and configure() runs AFTER nodeCreated on a loaded
+  // graph. So the sequence was: nodeCreated adds the button and sets the stamp →
+  // configure() deletes the button → loadedGraphNode sees the stamp and skips
+  // re-adding → the editor is unreachable on every LOADED Power Lora Loader,
+  // while working fine on a freshly dropped one. Checking that the widget is
+  // still there is both correct and cheap.
+  if (!hasEditButton(node)) {
+    appendButtonWidget(node as ButtonWidgetHost, EDIT_BUTTON_LABEL, () => openEditor(null, node), {
       logPrefix: EXT_NAME,
     });
   }
+}
+
+/** Is our node-level entry-point button still on the node? */
+function hasEditButton(node: PromptNode): boolean {
+  return !!node.widgets?.some((w) => w.name === EDIT_BUTTON_LABEL);
 }
 
 function refreshAllNodes(): void {

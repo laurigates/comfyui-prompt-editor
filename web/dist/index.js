@@ -1,6 +1,6 @@
 /* web/dist bundle built by bun from src/ in this repository (see package.json). Inlines @laurigates/comfy-modal-kit (MIT) - a first-party library by the same publisher, published to npm with provenance attestation: https://www.npmjs.com/package/@laurigates/comfy-modal-kit */
 
-// ../comfy-modal-kit/dist/index.js
+// node_modules/@laurigates/comfy-modal-kit/dist/index.js
 var KEY = Symbol.for("laurigates.comfyModalKit");
 function getKit() {
   const g = globalThis;
@@ -311,27 +311,6 @@ function pointerGuard(e) {
   e.stopImmediatePropagation();
   dismissActiveModal();
 }
-function resolveModelPicker(category) {
-  let best = null;
-  let bestPriority = Number.NEGATIVE_INFINITY;
-  for (const p of getKit().modelPickers) {
-    let supported = false;
-    try {
-      supported = p.supports(category);
-    } catch (e) {
-      console.warn(`[comfy-modal-kit] model picker "${p.id}" supports() threw`, e);
-      supported = false;
-    }
-    if (!supported)
-      continue;
-    const priority = p.priority ?? 0;
-    if (priority > bestPriority) {
-      best = p;
-      bestPriority = priority;
-    }
-  }
-  return best;
-}
 var STYLE_ID2 = "cmp-shell-style";
 var CSS2 = `
 .cmp-backdrop {
@@ -613,6 +592,27 @@ function openModalShell(opts = {}) {
     });
   }
   return controller;
+}
+function resolveModelPicker(category) {
+  let best = null;
+  let bestPriority = Number.NEGATIVE_INFINITY;
+  for (const p of getKit().modelPickers) {
+    let supported = false;
+    try {
+      supported = p.supports(category);
+    } catch (e) {
+      console.warn(`[comfy-modal-kit] model picker "${p.id}" supports() threw`, e);
+      supported = false;
+    }
+    if (!supported)
+      continue;
+    const priority = p.priority ?? 0;
+    if (priority > bestPriority) {
+      best = p;
+      bestPriority = priority;
+    }
+  }
+  return best;
 }
 var STYLE_ID3 = "cmp-overlay-style";
 var CSS3 = `

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.24](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.23...comfyui-prompt-editor-v0.1.24) (2026-07-30)
+
+
+### Features
+
+* **assets:** restyle the banner to the vector family ([#75](https://github.com/laurigates/comfyui-prompt-editor/issues/75)) ([377bd50](https://github.com/laurigates/comfyui-prompt-editor/commit/377bd507d98f3403e31a1ee2b8eade7592e7db57))
+
 ## [0.1.23](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.22...comfyui-prompt-editor-v0.1.23) (2026-07-27)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.25](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.24...comfyui-prompt-editor-v0.1.25) (2026-07-30)
+
+
+### Bug Fixes
+
+* **assets:** restore the blue sub-family accent on the banner ([#77](https://github.com/laurigates/comfyui-prompt-editor/issues/77)) ([cafa931](https://github.com/laurigates/comfyui-prompt-editor/commit/cafa9318c463ff7bd9c42df1562a35dbeac656e6))
+
 ## [0.1.24](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.23...comfyui-prompt-editor-v0.1.24) (2026-07-30)
 
 

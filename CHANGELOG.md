@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.26](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.25...comfyui-prompt-editor-v0.1.26) (2026-08-04)
+
+
+### Bug Fixes
+
+* **deps:** bump @laurigates/comfy-modal-kit ^0.8.0 -&gt; ^0.10.0 ([b21979c](https://github.com/laurigates/comfyui-prompt-editor/commit/b21979c6a781de93e358d3f8f8c5979995e65767))
+* **deps:** bump @laurigates/comfy-modal-kit to ^0.10.0 (toast-tap dismisses modal) ([#79](https://github.com/laurigates/comfyui-prompt-editor/issues/79)) ([b21979c](https://github.com/laurigates/comfyui-prompt-editor/commit/b21979c6a781de93e358d3f8f8c5979995e65767))
+
 ## [0.1.25](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.24...comfyui-prompt-editor-v0.1.25) (2026-07-30)
 
 

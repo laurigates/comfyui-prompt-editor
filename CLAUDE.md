@@ -26,7 +26,7 @@ vendored.
 | `__init__.py` | Loader stub. Empty `NODE_CLASS_MAPPINGS`; exports `WEB_DIRECTORY = "./web/dist"`. |
 | `src/index.ts` | The extension (TypeScript): widget interception + modal. Build entry. |
 | `src/comfyui-shims.d.ts` | Types the runtime `/scripts/app.js` import via a tsconfig `paths` shim. |
-| `web/dist/index.js` | **Generated** ESM build output (git-ignored). The served extension. |
+| `web/dist/index.js` | **Generated** ESM build output, but **committed** — see Hard rules. The served extension. |
 | `tsconfig.json` / `knip.json` | TS strict config (`noEmit`); knip dead-code gate. |
 | `pyproject.toml` | Comfy Registry metadata. `[tool.comfy] includes = ["web/dist"]`. `PublisherId` + `version` are the fields you touch. |
 | `.github/workflows/` | `ci.yml` (ruff/biome/typecheck/build/pytest/vitest/gitleaks), `publish.yml` (bun build then auto-publish on version bump), `release-please.yml`. |
@@ -53,6 +53,42 @@ bundled **inline**.
 - **Frontend hook is version-sensitive.** The modal opens via
   `widget.onPointerDown`. Keep an explicit button-widget fallback (Strategy
   B) if you depend on the modal being reachable.
+- **`web/dist/` is generated — never edit it, but always commit it.** Rebuild
+  and commit it in the same commit as the source change; CI enforces that with
+  `git diff --exit-code -- web/dist`. It is tracked because ComfyUI-Manager
+  installs and updates over **git**, and a `git fetch && merge --ff-only`
+  cannot pull an ignored path — the update reports success while ComfyUI keeps
+  serving the stale bundle. Consequence: a `comfy-modal-kit` bump is a
+  hand-authored PR (manifest + lockfile + rebuilt bundle together); a
+  manifest-only Renovate PR fails CI by construction.
+
+## Cross-pack integration suite
+
+`tests/js/cross-pack-touch-numeric.test.js` loads **comfyui-touch-numeric's real
+source** alongside this pack and asserts the pair through the kit's field
+registry. It exists because every other suite here tests against a *synthetic*
+provider (`field-bus.test.js` registers a fake one), and a real duplicate-control
+defect shipped while all of them stayed green — the failure was a property of the
+pair, invisible to either pack alone.
+
+Three mechanics make it work, and all three are load-bearing:
+
+| Piece | Why |
+|---|---|
+| `comfyui-touch-numeric` devDependency, pinned to a **release tag** | Tests against a published pack, not a moving branch. Bumping the tag is a deliberate, reviewable change. |
+| `server.deps.inline: [/comfyui-touch-numeric/]` in `vitest.config.js` | Vitest externalizes `node_modules` by default and would hand Node raw `.ts`. |
+| `openEditor` is exported | The suite drives the real build loop → `buildField` → provider resolution → `writeBack`. Testing `buildField` alone would miss the loop's own decisions, which is exactly where a duplicate control appears. |
+
+**Assert against the real cascade.** Both packs inject stylesheets via
+`ensureStyleOnce`, and jsdom resolves those rules through `getComputedStyle`.
+Layout assertions must read that, not `el.style` — the declarations that caused
+the scroll-trapping bug live in class rules, so an inline-style check is vacuous
+and passes against the bug.
+
+**Verify a new assertion has teeth**: pin the devDependency back to the release
+*before* the fix, confirm the test goes red for the right reason, then restore
+the pin. An integration test that has never failed has not been shown to test
+anything.
 
 ## Dev workflow
 

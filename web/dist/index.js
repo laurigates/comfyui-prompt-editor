@@ -1978,6 +1978,7 @@ app.registerExtension({
 export {
   resolveNumberFormat,
   removeLoraRow,
+  openEditor,
   moveLoraRow,
   loraShowsDualStrength,
   loraRowWidgets,

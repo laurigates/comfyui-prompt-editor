@@ -17,6 +17,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@comfyorg/comfyui-frontend-types": "^1.43.0",
+    "comfyui-touch-numeric": "github:laurigates/comfyui-touch-numeric#comfyui-touch-numeric-v0.1.19",
     "jsdom": "^29.1.1",
     "knip": "^5.0.0",
     "typescript": "^5.7.0",

@@ -1641,7 +1641,13 @@ function buildLoraAddStrip(node: PromptNode | null, hooks: LoraRowHooks): HTMLEl
 // Modal — full-viewport all-fields node editor
 // ============================================================
 
-function openEditor(
+// Exported for the cross-pack integration suite, which drives the REAL editor
+// (build loop -> buildField -> provider resolution -> writeBack -> commit) with
+// a real provider pack installed. Testing through buildField alone would miss
+// the loop's own decisions — which widgets it renders rows for is exactly where
+// a provider's duplicate control shows up. Not part of the runtime API; the
+// extension calls it through the pointer patch and the button widget below.
+export function openEditor(
   focusWidget: PromptWidget | null,
   node: PromptNode | null,
 ): ReturnType<typeof openModalShell> {

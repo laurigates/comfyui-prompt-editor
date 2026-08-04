@@ -8,6 +8,15 @@ export default defineConfig({
   test: {
     include: ["tests/js/**/*.test.js"],
     environment: "node",
+    server: {
+      deps: {
+        // The cross-pack suite imports a REAL provider pack's TypeScript source
+        // from node_modules (installed as a pinned git dependency). Vitest
+        // externalizes node_modules by default and would hand Node raw .ts —
+        // inlining routes it through vite's transform instead.
+        inline: [/comfyui-touch-numeric/],
+      },
+    },
   },
   resolve: {
     alias: {

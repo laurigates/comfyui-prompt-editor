@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.27](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.26...comfyui-prompt-editor-v0.1.27) (2026-08-16)
+
+
+### Miscellaneous
+
+* **ci:** guard registry-health against closing on Pending; drop duplicate Renovate runner ([#83](https://github.com/laurigates/comfyui-prompt-editor/issues/83)) ([af975a1](https://github.com/laurigates/comfyui-prompt-editor/commit/af975a1b112ee852fc32eb86faf0482dacd492be))
+
 ## [0.1.26](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.25...comfyui-prompt-editor-v0.1.26) (2026-08-04)
 
 

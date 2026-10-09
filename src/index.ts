@@ -1710,8 +1710,11 @@ export function openEditor(
     build();
   };
 
-  // Lazily resolved: the first build runs before openModalShell returns, so a
-  // shell captured by value would be null forever.
+  // Lazily resolved, because `modal` is assigned below. The first build() MUST
+  // therefore run after openModalShell returns: reading a `const` before its
+  // declaration is a temporal-dead-zone ReferenceError, not undefined, so the
+  // `?? null` is no guard (#70: it threw on every Power Lora Loader, and the
+  // edit button did nothing).
   const hooks: LoraRowHooks = { getShell: () => modal ?? null, rebuild };
 
   // Build a field for every editable widget on the node, in node order.
@@ -1735,8 +1738,6 @@ export function openEditor(
     const addStrip = buildLoraAddStrip(node, hooks);
     if (addStrip) wrap.appendChild(addStrip);
   }
-
-  build();
 
   let committed = false;
   const commit = (): void => {
@@ -1775,6 +1776,9 @@ export function openEditor(
     },
   });
 
+  // Build only now that the shell exists, so the LoRA rows' picker path sees it
+  // on the first render (see `hooks` above).
+  build();
   modal.bodyEl.appendChild(wrap);
 
   // A primary "Save" action in the footer-right cell.

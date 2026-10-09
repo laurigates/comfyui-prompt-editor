@@ -19,6 +19,7 @@ import {
   loraRowWidgets,
   loraShowsDualStrength,
   moveLoraRow,
+  openEditor,
   removeLoraRow,
 } from "../../src/index.ts";
 
@@ -504,5 +505,61 @@ describe("model-picker filename control", () => {
       expect(v.strength).toBe(0.65);
       expect(v.strengthTwo).toBeNull();
     });
+  });
+});
+
+// ============================================================
+// openEditor on a Power Lora Loader — the real host wiring
+// ============================================================
+//
+// Every suite above drives buildField with hand-made hooks, so none of them
+// exercised the hooks openEditor itself builds. Live on a real rgthree install
+// (#70) that wiring threw on every Power Lora Loader: the first build ran
+// before `const modal = openModalShell(...)`, and `getShell: () => modal ?? null`
+// read `modal` inside its temporal dead zone — a ReferenceError, not null — so
+// the "⤢ Edit fields" button did nothing at all.
+
+describe("openEditor on a Power Lora Loader", () => {
+  let modal;
+  const loraNode = () => {
+    const node = fakeNode([chrome("divider"), chrome("header"), row("a.safetensors"), row("None")]);
+    node.addNewLoraWidget = () => undefined;
+    return node;
+  };
+  const picker = () => ({
+    id: "test:loras-host",
+    priority: 10,
+    supports: (c) => c === "loras",
+    create: () => ({
+      el: document.createElement("div"),
+      getValue: () => "",
+      hasChanged: () => false,
+    }),
+  });
+
+  beforeEach(() => {
+    getModelPickers().length = 0;
+  });
+  afterEach(() => {
+    getModelPickers().length = 0;
+    modal?.close();
+    modal = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("opens and renders every row", () => {
+    expect(() => {
+      modal = openEditor(null, loraNode());
+    }).not.toThrow();
+    expect(modal.bodyEl.querySelectorAll(".pe-lora")).toHaveLength(2);
+    expect(modal.bodyEl.querySelector(".pe-lora-add")).not.toBeNull();
+  });
+
+  it("offers the picker on the FIRST render, not only after a rebuild", () => {
+    registerModelPicker(picker());
+    modal = openEditor(null, loraNode());
+    const names = [...modal.bodyEl.querySelectorAll(".pe-lora-name")];
+    expect(names).toHaveLength(2);
+    for (const n of names) expect(n.tagName).toBe("BUTTON");
   });
 });

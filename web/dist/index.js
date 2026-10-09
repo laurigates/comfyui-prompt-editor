@@ -1884,7 +1884,6 @@ function openEditor(focusWidget, node) {
     if (addStrip)
       wrap.appendChild(addStrip);
   }
-  build();
   let committed = false;
   const commit = () => {
     if (committed)
@@ -1913,6 +1912,7 @@ function openEditor(focusWidget, node) {
       bus.destroy();
     }
   });
+  build();
   modal.bodyEl.appendChild(wrap);
   const saveBtn = makeBtn("Save", "Save (Cmd/Ctrl+Enter)", "pe-btn-primary");
   saveBtn.addEventListener("click", commit);

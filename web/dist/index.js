@@ -1423,13 +1423,13 @@ function buildField(widget, kind, node = null, bus, hooks) {
   el.appendChild(label);
   if (kind === "lora") {
     el.classList.add("pe-lora");
-    const initial2 = isLoraWidgetValue(widget.value) ? widget.value : {};
+    const initial = isLoraWidgetValue(widget.value) ? widget.value : {};
     const num = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
-    const initialOn = initial2.on !== false;
-    const initialLora = typeof initial2.lora === "string" ? initial2.lora : "";
-    const initialStrength = num(initial2.strength, 1);
-    const hasTwo = loraShowsDualStrength(node, initial2);
-    const initialStrengthTwo = num(initial2.strengthTwo, initialStrength);
+    const initialOn = initial.on !== false;
+    const initialLora = typeof initial.lora === "string" ? initial.lora : "";
+    const initialStrength = num(initial.strength, 1);
+    const hasTwo = loraShowsDualStrength(node, initial);
+    const initialStrengthTwo = num(initial.strengthTwo, initialStrength);
     label.textContent = loraFileLabel(initialLora) || widget.name || "lora";
     const fmtStrength = (n) => String(Math.round((Number.isFinite(n) ? n : 0) * 100) / 100);
     const head = document.createElement("div");
@@ -1506,7 +1506,7 @@ function buildField(widget, kind, node = null, bus, hooks) {
       on: onInput.checked,
       lora: currentLora,
       strength: readNum(strengthInput, initialStrength),
-      strengthTwo: hasTwo ? readNum(strengthTwoInput, initialStrengthTwo) : initial2.strengthTwo ?? null
+      strengthTwo: hasTwo ? readNum(strengthTwoInput, initialStrengthTwo) : initial.strengthTwo ?? null
     });
     const onAnyChange = () => announce(readValue());
     const makeStrengthRow = (text, initNum) => {
@@ -1515,8 +1515,8 @@ function buildField(widget, kind, node = null, bus, hooks) {
       const lab = document.createElement("label");
       lab.className = "pe-hint";
       lab.textContent = text;
-      const bar2 = document.createElement("div");
-      bar2.className = "pe-bar";
+      const bar = document.createElement("div");
+      bar.className = "pe-bar";
       const minus = makeBtn("−", `Decrease ${text}`);
       const input = document.createElement("input");
       input.type = "number";
@@ -1533,8 +1533,8 @@ function buildField(widget, kind, node = null, bus, hooks) {
       minus.addEventListener("click", () => step(-0.05));
       plus.addEventListener("click", () => step(0.05));
       input.addEventListener("input", onAnyChange);
-      bar2.append(minus, input, plus);
-      row.append(lab, bar2);
+      bar.append(minus, input, plus);
+      row.append(lab, bar);
       return { row, input };
     };
     onInput.addEventListener("change", onAnyChange);
@@ -1562,14 +1562,14 @@ function buildField(widget, kind, node = null, bus, hooks) {
       actions.className = "pe-lora-actions";
       const rows = loraRowWidgets(node);
       const pos = rows.indexOf(widget);
-      const structural = (label2, run) => {
-        const b = makeBtn(label2, "", "pe-lora-act");
+      const structural = (label, run) => {
+        const b = makeBtn(label, "", "pe-lora-act");
         b.addEventListener("click", () => {
           try {
             if (!run())
               return;
           } catch (e) {
-            console.warn(`[${EXT_NAME}] lora row ${label2} failed`, e);
+            console.warn(`[${EXT_NAME}] lora row ${label} failed`, e);
             notify({
               severity: "error",
               summary: "Row change failed",
@@ -1615,12 +1615,12 @@ function buildField(widget, kind, node = null, bus, hooks) {
     };
   }
   if (kind === "boolean") {
-    const initial2 = widget.value === true;
+    const initial = widget.value === true;
     const row = document.createElement("div");
     row.className = "pe-toggle";
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.checked = initial2;
+    input.checked = initial;
     const labelText = document.createElement("span");
     labelText.className = "pe-hint";
     const sync = () => {
@@ -1638,20 +1638,20 @@ function buildField(widget, kind, node = null, bus, hooks) {
       kind,
       el,
       read: () => input.checked,
-      changed: () => input.checked !== initial2,
+      changed: () => input.checked !== initial,
       focus: () => input.focus()
     };
   }
   if (kind === "combo") {
     const values = widget.options?.values ?? [];
-    const initial2 = widget.value;
+    const initial = widget.value;
     const select = document.createElement("select");
     select.className = "pe-select";
     for (const v of values) {
       const opt = document.createElement("option");
       opt.value = String(v);
       opt.textContent = String(v);
-      if (String(v) === String(initial2))
+      if (String(v) === String(initial))
         opt.selected = true;
       select.appendChild(opt);
     }
@@ -1666,19 +1666,19 @@ function buildField(widget, kind, node = null, bus, hooks) {
       kind,
       el,
       read,
-      changed: () => String(read()) !== String(initial2),
+      changed: () => String(read()) !== String(initial),
       focus: () => select.focus()
     };
   }
   if (kind === "number") {
     const originalValue = widget.value;
     const rawInitial = typeof originalValue === "number" ? originalValue : Number(originalValue);
-    const initial2 = Number.isFinite(rawInitial) ? rawInitial : 0;
+    const initial = Number.isFinite(rawInitial) ? rawInitial : 0;
     const { isInt, min, max, step } = resolveNumberFormat(widget.options);
     const input = document.createElement("input");
     input.type = "number";
     input.className = "pe-input";
-    input.value = String(initial2);
+    input.value = String(initial);
     input.inputMode = isInt ? "numeric" : "decimal";
     if (min !== undefined)
       input.min = String(min);
@@ -1690,7 +1690,7 @@ function buildField(widget, kind, node = null, bus, hooks) {
     const read = () => {
       const n = Number.parseFloat(input.value);
       if (!Number.isFinite(n))
-        return initial2;
+        return initial;
       let v = n;
       if (min !== undefined)
         v = Math.max(min, v);
@@ -1709,11 +1709,11 @@ function buildField(widget, kind, node = null, bus, hooks) {
     };
   }
   if (kind === "text") {
-    const initial2 = typeof widget.value === "string" ? widget.value : "";
+    const initial = typeof widget.value === "string" ? widget.value : "";
     const input = document.createElement("input");
     input.type = "text";
     input.className = "pe-input";
-    input.value = initial2;
+    input.value = initial;
     input.spellcheck = false;
     input.autocapitalize = "off";
     input.autocomplete = "off";
@@ -1725,7 +1725,7 @@ function buildField(widget, kind, node = null, bus, hooks) {
       kind,
       el,
       read: () => input.value,
-      changed: () => input.value !== initial2,
+      changed: () => input.value !== initial,
       focus: () => input.focus()
     };
   }
@@ -1976,22 +1976,22 @@ app.registerExtension({
   }
 });
 export {
-  resolveNumberFormat,
-  removeLoraRow,
-  openEditor,
-  moveLoraRow,
-  loraShowsDualStrength,
-  loraRowWidgets,
-  loraFileLabel,
-  isTargetWidget,
-  isMultilineStringWidget,
-  isLoraWidgetValue,
-  isEmptyLoraFile,
-  enhanceNode,
-  createFieldBus,
-  classifyEditableWidget,
-  canAddLoraRow,
-  bumpWeight,
+  TARGET_WIDGET_NAMES,
   buildField,
-  TARGET_WIDGET_NAMES
+  bumpWeight,
+  canAddLoraRow,
+  classifyEditableWidget,
+  createFieldBus,
+  enhanceNode,
+  isEmptyLoraFile,
+  isLoraWidgetValue,
+  isMultilineStringWidget,
+  isTargetWidget,
+  loraFileLabel,
+  loraRowWidgets,
+  loraShowsDualStrength,
+  moveLoraRow,
+  openEditor,
+  removeLoraRow,
+  resolveNumberFormat
 };

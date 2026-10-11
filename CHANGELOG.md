@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.28](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.27...comfyui-prompt-editor-v0.1.28) (2026-10-09)
+
+
+### Bug Fixes
+
+* **lora:** open the editor on Power Lora Loader nodes again ([#86](https://github.com/laurigates/comfyui-prompt-editor/issues/86)) ([fdee630](https://github.com/laurigates/comfyui-prompt-editor/commit/fdee630717ea627247343a31b752284a0d35214e)), closes [#70](https://github.com/laurigates/comfyui-prompt-editor/issues/70)
+
 ## [0.1.27](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.26...comfyui-prompt-editor-v0.1.27) (2026-08-16)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.30](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.29...comfyui-prompt-editor-v0.1.30) (2026-11-16)
+
+
+### Bug Fixes
+
+* **types:** move @comfyorg/comfyui-frontend-types to ^1.60.0 ([#103](https://github.com/laurigates/comfyui-prompt-editor/issues/103)) ([96eb826](https://github.com/laurigates/comfyui-prompt-editor/commit/96eb82640145ea5e342ccda583ca36b9e3d9eba4))
+
 ## [0.1.29](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.28...comfyui-prompt-editor-v0.1.29) (2026-10-23)
 
 

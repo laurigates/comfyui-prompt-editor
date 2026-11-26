@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.31](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.30...comfyui-prompt-editor-v0.1.31) (2026-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency playwright to v1.55.1 [security] ([#96](https://github.com/laurigates/comfyui-prompt-editor/issues/96)) ([a37caed](https://github.com/laurigates/comfyui-prompt-editor/commit/a37caed00fb1f01b94c94d87c15ddf03f26775e2))
+
+
+### Miscellaneous
+
+* **claude:** reconcile Claude Code config with the repo baseline ([#100](https://github.com/laurigates/comfyui-prompt-editor/issues/100)) ([b292911](https://github.com/laurigates/comfyui-prompt-editor/commit/b2929119caac2e6a818a4cdf6198b0f985e87ac3))
+* **deps:** update dependency virtualenv to v21.14.10 [security] ([#105](https://github.com/laurigates/comfyui-prompt-editor/issues/105)) ([b66d2a2](https://github.com/laurigates/comfyui-prompt-editor/commit/b66d2a2e5c3ae5b64c12c61e5e17ad7d0368904f))
+
 ## [0.1.30](https://github.com/laurigates/comfyui-prompt-editor/compare/comfyui-prompt-editor-v0.1.29...comfyui-prompt-editor-v0.1.30) (2026-11-16)
 
 
